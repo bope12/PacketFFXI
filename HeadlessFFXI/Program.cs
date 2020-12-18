@@ -20,16 +20,10 @@ namespace HeadlessFFXI
                 TcpClient client = new TcpClient("127.0.0.1", 54231);
                 NetworkStream stream = client.GetStream();
                 Byte[] data = new Byte[33];
-                data[0] = Convert.ToByte('l');
-                data[1] = Convert.ToByte('g');
-                data[2] = Convert.ToByte('c');
-                data[3] = Convert.ToByte('k');
-                data[16] = Convert.ToByte('q');
-                data[17] = Convert.ToByte('s');
-                data[18] = Convert.ToByte('d');
-                data[19] = Convert.ToByte('1');
-                data[20] = Convert.ToByte('2');
-                data[21] = Convert.ToByte('3');
+                string username = "lgck";
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(username), 0, data, 0, username.Length);
+                string password = "qsd123";
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(password), 0, data, 16, password.Length);
                 data[32] = 0x10;
                 stream.Write(data, 0, 33);
                 data = new Byte[16];
@@ -37,7 +31,6 @@ namespace HeadlessFFXI
                 switch (data[0])
                 {
                     case 0x0001:
-                        //await SendMessage(e.Message.Channel, "I was able to login " + e.Author.Username);
                         Console.WriteLine("Info Received and accepted");
                         actid = BitConverter.ToUInt32(data, 1);
                         Console.WriteLine("Account id:" + actid);
@@ -99,8 +92,7 @@ namespace HeadlessFFXI
         }
         static void LobbyData0xA2()
         {
-            byte[] data = new byte[25];
-            data[0] = 0xA2;
+            byte[] data = {0xA2,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x58,0xE0,0x5D,0xAD,0x00,0x00,0x00,0x00};
             datastream.Write(data,0,25);
         }
             static void LobbyData()
