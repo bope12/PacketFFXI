@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text.Encodings;
 using System.Net.Sockets;
+using System.IO;
 
 namespace HeadlessFFXI
 {
@@ -12,17 +13,50 @@ namespace HeadlessFFXI
         static NetworkStream datastream;
         static uint actid;
         static uint charid;
+        static string username;
+        static string password;
+        static int char_slot = 0;
+        static uint zoneport;
         static void Main(string[] args)
         {
-            Console.WriteLine("Attempting to send login request");
+            if(File.Exists("config.cfg"))
+            {
+                string line;
+                System.IO.StreamReader cfg = new System.IO.StreamReader("config.cfg");
+                while((line = cfg.ReadLine()) != null)
+                {
+                    string[] setting = line.Split(":");
+                    switch(setting[0])
+                    {
+                        case "username":
+                            username = setting[1];
+                            break;
+                        case "password":
+                            password = setting[1];
+                            setting[1] = "********";
+                            break;
+                        case "char_slot":
+                            char_slot = Int16.Parse(setting[1]) - 1;
+                            break;
+                    }
+                    Console.WriteLine(setting[0] + " " + setting[1]);
+                }
+                if (username == null)
+                {
+                    Console.WriteLine("No username found in cfg");
+                }
+                if (password == null)
+                {
+                    Console.WriteLine("No password found in cfg");
+                }
+            }
+            Console.Write("Attempting to login");
             try
             {
                 TcpClient client = new TcpClient("127.0.0.1", 54231);
                 NetworkStream stream = client.GetStream();
                 Byte[] data = new Byte[33];
-                string username = "lgck";
                 System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(username), 0, data, 0, username.Length);
-                string password = "qsd123";
                 System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(password), 0, data, 16, password.Length);
                 data[32] = 0x10;
                 stream.Write(data, 0, 33);
@@ -31,14 +65,17 @@ namespace HeadlessFFXI
                 switch (data[0])
                 {
                     case 0x0001:
-                        Console.WriteLine("Info Received and accepted");
+                        Console.WriteLine(" ,Login passed");
                         actid = BitConverter.ToUInt32(data, 1);
                         Console.WriteLine("Account id:" + actid);
                         LobbyData();
                         LobbyView0x26();
                         break;
+                    case 0x0002:
+                        Console.WriteLine(" ,Login failed invalid user name or password");
+                        break;
                     default:
-                        Console.WriteLine("Unsure Code:" + data[0]);
+                        Console.WriteLine(" ,Login failed Unsure Code:" + data[0]);
                         break;
                 }
                 stream.Close();
@@ -46,7 +83,15 @@ namespace HeadlessFFXI
             }
             catch (SocketException d)
             {
-                Console.WriteLine("Error received:" + d.Message);
+                switch (d.ErrorCode)
+                {
+                    case 10061:
+                        Console.WriteLine(", Failed, No responce from server");
+                        break;
+                    default:
+                        Console.WriteLine(" Error received:" + d.ErrorCode + ", " + d.Message);
+                    break;
+                }
             }
         }
         static void LobbyView0x26()
@@ -94,8 +139,32 @@ namespace HeadlessFFXI
         {
             byte[] data = {0xA2,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x58,0xE0,0x5D,0xAD,0x00,0x00,0x00,0x00};
             datastream.Write(data,0,25);
+            data = new byte[0x48];
+            viewstream.Read(data, 0, 0x48);
+            uint error = BitConverter.ToUInt16(data, 32);
+            switch(error)
+            {
+                case 305:
+                case 321:
+                    Console.WriteLine("Login server failed to pass us off to the gameserver");
+                    return;
+                default:
+                    break;
+            }
+            uint zoneip = BitConverter.ToUInt32(data, 0x38);
+            zoneport = BitConverter.ToUInt16(data, 0x3C);
+            uint searchip = BitConverter.ToUInt32(data, 0x40);
+            uint searchport = BitConverter.ToUInt16(data, 0x44);
+            Console.WriteLine("Handed off to gameserver " + zoneip + ":" + zoneport);
+            GameserverStart();
         }
-            static void LobbyData()
+        static void GameserverStart()
+        {
+            var Packet_Head = 28;
+            UdpClient Gameserver = new UdpClient("localhost", Convert.ToInt32(zoneport));
+            Console.Read();
+        }
+        static void LobbyData()
         {
             lobbydata = new TcpClient("127.0.0.1", 54230);
             datastream = lobbydata.GetStream();
@@ -117,21 +186,26 @@ namespace HeadlessFFXI
             datastream.Write(data);
             data = new byte[328];
             datastream.Read(data, 0, 328);           
-            /*for(int i = 0;i<328; i++)
-            {
-                if(data[i] != 0)
-                Console.WriteLine("i:"+i+" "+data[i]);
-            }*/
             data = new byte[2272];
             viewstream.Read(data,0,2272);
-            /*for (int i = 0; i < 2272; i++)
-            {
-                if (data[i] != 0)
-                    Console.WriteLine("i:" + i + " " + data[i]);
-            }*/
-            Console.WriteLine("Charid:" + BitConverter.ToUInt32(data,36));
-            charid = BitConverter.ToUInt32(data, 36);
-            Console.WriteLine("Name:" +System.Text.Encoding.UTF8.GetString(data,44,5));
+            Console.WriteLine("Charid:" + BitConverter.ToUInt32(data,36 + (char_slot * 140)));
+            charid = BitConverter.ToUInt32(data, 36 + (char_slot * 140));
+            Console.WriteLine("Name:" +System.Text.Encoding.UTF8.GetString(data, 44 + (char_slot * 140), 16));
+            /*ref<uint8>(CharList, 46 + 32 + i * 140) = MainJob;
+            ref<uint8>(CharList, 73 + 32 + i * 140) = lvlMainJob;
+
+            ref<uint8>(CharList, 44 + 32 + i * 140) = (uint8)Sql_GetIntData(SqlHandle, 5); // race;
+            ref<uint8>(CharList, 56 + 32 + i * 140) = (uint8)Sql_GetIntData(SqlHandle, 6); // face;
+            ref<uint16>(CharList, 58 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 7); // head;
+            ref<uint16>(CharList, 60 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 8); // body;
+            ref<uint16>(CharList, 62 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 9); // hands;
+            ref<uint16>(CharList, 64 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 10); // legs;
+            ref<uint16>(CharList, 66 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 11); // feet;
+            ref<uint16>(CharList, 68 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 12); // main;
+            ref<uint16>(CharList, 70 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 13); // sub;
+
+            ref<uint8>(CharList, 72 + 32 + i * 140) = (uint8)zone;
+            ref<uint16>(CharList, 78 + 32 + i * 140) = zone;*/
             LobbyView0x24();
         }
     }
