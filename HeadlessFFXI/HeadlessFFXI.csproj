@@ -5,10 +5,4 @@
     <TargetFramework>net5.0</TargetFramework>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Reference Include="BouncyCastle.Crypto">
-      <HintPath>BouncyCastle.Crypto.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
 </Project>

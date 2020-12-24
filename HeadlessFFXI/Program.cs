@@ -10,25 +10,46 @@ namespace HeadlessFFXI
 {
     class Program
     {
+        static string loginserver = "127.0.0.1";
         static TcpClient lobbyview;
         static NetworkStream viewstream;
         static TcpClient lobbydata;
         static NetworkStream datastream;
-        static uint actid;
-        static uint charid;
-        static string username;
-        static string password;
-        static int char_slot = 0;
         static IPEndPoint RemoteIpEndPoint;
-        static MD5 hasher = MD5.Create();
-        static Blowfish tpzblowfish = new Blowfish();
         static UdpClient Gameserver;
-        static uint[] startingkey = { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xAD5DE056 };
-        static int Packet_Head = 28;
+        static MD5 hasher = MD5.Create();
         static UInt16 PDcode = 1;
+        static uint[] startingkey = { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xAD5DE056 };
+        static Blowfish tpzblowfish;
+        static AccountInfo Account_Data; 
+        static My_Player Player_Data;
+        const int Packet_Head = 28;
         static void Main(string[] args)
         {
-            if(File.Exists("config.cfg"))
+            if(args.Length == 6 || args.Length == 8)
+            { 
+                for(int i=0;i<=args.Length/2;i+=2)
+                {
+                    string s = args[i];
+                    switch(s)
+                    {
+                        case "-user":
+                            Account_Data.Username = args[i+1];
+                            break;
+                        case "-pass":
+                            Account_Data.Password = args[i + 1];
+                            break;
+                        case "-slot":
+                            Account_Data.Char_Slot = Int16.Parse(args[i + 1]) - 1;
+                            break;
+                        case "-server":
+                            loginserver = args[i + 1];
+                            break;
+                    }
+                    Console.WriteLine(args[i] + " " + args[i+1]);
+                }    
+            }
+            else if(File.Exists("config.cfg"))
             {
                 string line;
                 System.IO.StreamReader cfg = new System.IO.StreamReader("config.cfg");
@@ -38,53 +59,66 @@ namespace HeadlessFFXI
                     switch(setting[0])
                     {
                         case "username":
-                            username = setting[1];
+                            Account_Data.Username = setting[1];
                             break;
                         case "password":
-                            password = setting[1];
+                            Account_Data.Password = setting[1];
                             setting[1] = "********";
                             break;
                         case "char_slot":
-                            char_slot = Int16.Parse(setting[1]) - 1;
+                            Account_Data.Char_Slot = Int16.Parse(setting[1]) - 1;
+                            break;
+                        case "server":
+                            loginserver = setting[1];
                             break;
                     }
                     Console.WriteLine(setting[0] + " " + setting[1]);
                 }
-                if (username == null)
+                if (Account_Data.Username == null)
                 {
                     Console.WriteLine("No username found in cfg");
                 }
-                if (password == null)
+                if (Account_Data.Password == null)
                 {
                     Console.WriteLine("No password found in cfg");
                 }
             }
-            Console.Write("Attempting to login");
+            else
+            {
+                Console.WriteLine("No login information provided, Move config file into folder with exe or add launch args with -user user -pass pass -slot #");
+            }
+            Account_Login();
+        }
+        #region Loginproccess
+        static void Account_Login()
+        {
+            Console.Write("Attempting to login ");
             try
             {
-                TcpClient client = new TcpClient("127.0.0.1", 54231);
+                TcpClient client = new TcpClient(loginserver, 54231);
                 NetworkStream stream = client.GetStream();
                 Byte[] data = new Byte[33];
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(username), 0, data, 0, username.Length);
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(password), 0, data, 16, password.Length);
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Username), 0, data, 0, Account_Data.Username.Length);
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Password), 0, data, 16, Account_Data.Password.Length);
                 data[32] = 0x10;
                 stream.Write(data, 0, 33);
-                data = new Byte[16];
-                stream.Read(data, 0, 16);
-                switch (data[0])
+                byte[] indata = new Byte[16];
+                stream.Read(indata, 0, 16);
+                switch (indata[0])
                 {
-                    case 0x0001:
-                        Console.WriteLine(" ,Login passed");
-                        actid = BitConverter.ToUInt32(data, 1);
-                        Console.WriteLine("Account id:" + actid);
+                    case 0x0001: //Login Success
+                        Console.WriteLine(",Login passed");
+                        Account_Data.ID = BitConverter.ToUInt32(indata, 1);
+                        Console.WriteLine("Account id:{0:D}", Account_Data.ID);
                         LobbyData();
                         LobbyView0x26();
                         break;
                     case 0x0002:
-                        Console.WriteLine(" ,Login failed invalid user name or password");
+                        Console.WriteLine(",Login failed.Trying to create the account");
+                        Account_Creation(data);
                         break;
                     default:
-                        Console.WriteLine(" ,Login failed Unsure Code:" + data[0]);
+                        Console.WriteLine(" ,Login failed Unsure Code:" + indata[0]);
                         break;
                 }
                 stream.Close();
@@ -99,13 +133,55 @@ namespace HeadlessFFXI
                         break;
                     default:
                         Console.WriteLine(" Error received:" + d.ErrorCode + ", " + d.Message);
-                    break;
+                        break;
                 }
             }
         }
+        static void Account_Creation(byte[] data)
+        {
+            TcpClient client = new TcpClient(loginserver, 54231);
+            NetworkStream stream = client.GetStream();
+            data[32] = 0x20;
+            stream.Write(data, 0, 33);
+            byte[] indata = new Byte[1];
+            stream.Read(indata, 0, 1);
+            switch (indata[0])
+            {
+                case 0x03: //Account creation success
+                    Console.WriteLine("New account created");
+                    Account_Login();
+                    break;
+                case 0x04: //Acount already exists
+                    Console.WriteLine("Account already exists, Check your username/password");
+                    break;
+                case 0x08: //Account creation disabled
+                    Console.WriteLine("Account creation is disabled, If your account already exists check your username/password");
+                    break;
+                case 0x09: //Acount creation error
+                    Console.WriteLine("Server failed to create a new account");
+                    break;
+                default:
+                    break;
+            }
+        }
+        //Setup connection to the lobbyData handler
+        static void LobbyData()
+        {
+            lobbydata = new TcpClient(loginserver, 54230);
+            datastream = lobbydata.GetStream();
+            Byte[] dat = new Byte[1];
+            dat[0] = 0xA1;
+            Byte[] id = BitConverter.GetBytes(Account_Data.ID);
+            Byte[] data = new Byte[dat.Length + id.Length];
+            System.Buffer.BlockCopy(dat, 0, data, 0, dat.Length);
+            System.Buffer.BlockCopy(id, 0, data, dat.Length, id.Length);
+            datastream.Write(data, 0, data.Length);
+        }
+        //The rest of the login process is a linary set of send receive packets with both the lobbyData and lobbyView connections
+        //Client ver check, receive information about account
         static void LobbyView0x26()
         {
-            lobbyview = new TcpClient("127.0.0.1", 54001);
+            lobbyview = new TcpClient(loginserver, 54001);
             viewstream = lobbyview.GetStream();
             Byte[] ver = System.Text.Encoding.ASCII.GetBytes("30201004_0");
             Byte[] data = new byte[152];
@@ -114,8 +190,8 @@ namespace HeadlessFFXI
             viewstream.Write(data, 0, 152);
             data = new Byte[40];
             viewstream.Read(data, 0, 40);
-            Console.WriteLine("Expantion Bitmask:" + BitConverter.ToUInt16(data, 32));
-            Console.WriteLine("Feature Bitmask:" + BitConverter.ToUInt16(data, 36));
+            Console.WriteLine("Expantion Bitmask:{0:D}", BitConverter.ToUInt16(data, 32));
+            Console.WriteLine("Feature Bitmask:{0:D}", BitConverter.ToUInt16(data, 36));
             LobbyView0x1F();
         }
         static void LobbyView0x1F()
@@ -124,6 +200,41 @@ namespace HeadlessFFXI
             data[8] = 0x1F;
             viewstream.Write(data, 0, 44);
             LobbyData0xA1();
+        }
+        static void LobbyData0xA1()
+        {
+            Byte[] data = new Byte[13];
+            Byte[] ip = BitConverter.GetBytes(((uint)16777343)); //This does not seem to really matter
+            System.Buffer.BlockCopy(ip, 0, data, 0, ip.Length);
+            //data[0] = 0xA1;
+            datastream.Flush();
+            datastream.Write(data);
+            data = new byte[328];
+            datastream.Read(data, 0, 328);
+            data = new byte[2272];
+            viewstream.Read(data, 0, 2272);
+            Player_Data.ID = BitConverter.ToUInt32(data, 36 + (Account_Data.Char_Slot * 140));
+            Player_Data.Name = System.Text.Encoding.UTF8.GetString(data, 44 + (Account_Data.Char_Slot * 140), 16);
+            Player_Data.Job = data[46 + 32 + (Account_Data.Char_Slot * 140)];
+            Player_Data.Level = data[73 + 32 + (Account_Data.Char_Slot * 140)];
+            Player_Data.zone = data[72 + 32 + (Account_Data.Char_Slot * 140)];
+
+            Console.WriteLine("Name:{0:G} CharID:{1:D} Job:{2:D} Level:{3:D}", new object[] { Player_Data.Name, Player_Data.ID, Player_Data.Job, Player_Data.Level });
+            /*
+            ref<uint8>(CharList, 44 + 32 + i * 140) = (uint8)Sql_GetIntData(SqlHandle, 5); // race;
+            ref<uint8>(CharList, 56 + 32 + i * 140) = (uint8)Sql_GetIntData(SqlHandle, 6); // face;
+            ref<uint16>(CharList, 58 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 7); // head;
+            ref<uint16>(CharList, 60 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 8); // body;
+            ref<uint16>(CharList, 62 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 9); // hands;
+            ref<uint16>(CharList, 64 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 10); // legs;
+            ref<uint16>(CharList, 66 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 11); // feet;
+            ref<uint16>(CharList, 68 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 12); // main;
+            ref<uint16>(CharList, 70 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 13); // sub;
+            ref<uint16>(CharList, 78 + 32 + i * 140) = zone;
+            */
+
+
+            LobbyView0x24();
         }
         static void LobbyView0x24()
         {
@@ -139,7 +250,7 @@ namespace HeadlessFFXI
         {
             Byte[] data = new byte[88];
             data[8] = 0x07;
-            Byte[] id = BitConverter.GetBytes(charid);
+            Byte[] id = BitConverter.GetBytes(Player_Data.ID);
             System.Buffer.BlockCopy(id, 0, data, 28, id.Length);
             viewstream.Write(data, 0, 88);
             LobbyData0xA2();
@@ -170,6 +281,7 @@ namespace HeadlessFFXI
             Console.WriteLine("Handed off to gameserver " + zoneip + ":" + zoneport);
             GameserverStart();
         }
+        #endregion
         static void packet_addmd5(ref byte[] data)
         {
             byte[] tomd5 = new byte[data.Length - (Packet_Head + 16)];
@@ -184,7 +296,6 @@ namespace HeadlessFFXI
             ThreadStart Incomingref = new ThreadStart(ParseIncomingPacket);
             Thread Incoming = new Thread(Incomingref);
             Incoming.Start();
-            //Gameserver.Connect("127.0.0.1", Convert.ToInt32(zoneport));
             Logintozone();
         }
         static void ParseIncomingPacket()
@@ -253,7 +364,10 @@ namespace HeadlessFFXI
                 }
             }
             Console.WriteLine("Blowfish hashed key " + BitConverter.ToString(hashkey).Replace(" - ", ""));
+            tpzblowfish = new Blowfish();
             tpzblowfish.Init(hashkey, 16);
+
+            #region ZoneInpackets
             byte[] data = new byte[136];
             byte[] input = BitConverter.GetBytes(PDcode); //Packet count
             System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
@@ -263,11 +377,20 @@ namespace HeadlessFFXI
             System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
             input = BitConverter.GetBytes(PDcode); //Packet count
             System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
-            input = BitConverter.GetBytes(charid);
+            input = BitConverter.GetBytes(Player_Data.ID);
             System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x0C, input.Length);
             packet_addmd5(ref data);
             Console.WriteLine("Sending a request to load into a zone");
-            Gameserver.Send(data, data.Length);
+            try
+            {
+                Gameserver.Send(data, data.Length);
+            }
+            catch(SocketException d)
+            {
+                Console.WriteLine("Failed to connect to the gameserver retrying");
+                startingkey[4] -= 2;
+                Logintozone();
+            }
             PDcode++;
             data = new byte[53];
             input = BitConverter.GetBytes(PDcode); //Packet count
@@ -281,7 +404,8 @@ namespace HeadlessFFXI
             packet_addmd5(ref data);
             Console.WriteLine("Sending zone in confirmation");
             Gameserver.Send(data, data.Length);
-
+            #endregion
+            #region RequestCharInfo
             data = new byte[183];
             input = BitConverter.GetBytes(PDcode); //Packet count
             System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
@@ -352,6 +476,7 @@ namespace HeadlessFFXI
             Console.WriteLine("Sending Post zone data request");
             Gameserver.Send(data, data.Length);
             PDcode++;
+            #endregion
             float pos = 0;
             bool plus = true;
             while(true)
@@ -377,7 +502,7 @@ namespace HeadlessFFXI
                 pos = plus ? pos + .2F : pos - .2F;
                 if (pos > 3F || pos < -3f)
                     plus = !plus;
-                Console.WriteLine("Line Dance");
+                Console.WriteLine("Outgoing Packet: Line dancing Pos:{0:G}",pos);
                 packet_addmd5(ref data);
                 Gameserver.Send(data, data.Length);
                 Thread.Sleep(750);
@@ -385,49 +510,31 @@ namespace HeadlessFFXI
 
             Console.Read();
         }
-        static void LobbyData()
-        {
-            lobbydata = new TcpClient("127.0.0.1", 54230);
-            datastream = lobbydata.GetStream();
-            Byte[] dat = new Byte[1];
-            dat[0] = 0xA1;
-            Byte[] id = BitConverter.GetBytes(actid);
-            Byte[] data = new Byte[dat.Length + id.Length];
-            System.Buffer.BlockCopy(dat, 0, data,0,dat.Length);
-            System.Buffer.BlockCopy(id, 0, data, dat.Length, id.Length);
-            datastream.Write(data, 0, data.Length);
-        }
-        static void LobbyData0xA1()
-        {
-            Byte[] data = new Byte[13];
-            Byte[] ip = BitConverter.GetBytes(((uint)16777343));
-            System.Buffer.BlockCopy(ip, 0, data, 0, ip.Length);
-            //data[0] = 0xA1;
-            datastream.Flush();
-            datastream.Write(data);
-            data = new byte[328];
-            datastream.Read(data, 0, 328);           
-            data = new byte[2272];
-            viewstream.Read(data,0,2272);
-            Console.WriteLine("Charid:" + BitConverter.ToUInt32(data,36 + (char_slot * 140)));
-            charid = BitConverter.ToUInt32(data, 36 + (char_slot * 140));
-            Console.WriteLine("Name:" +System.Text.Encoding.UTF8.GetString(data, 44 + (char_slot * 140), 16));
-            /*ref<uint8>(CharList, 46 + 32 + i * 140) = MainJob;
-            ref<uint8>(CharList, 73 + 32 + i * 140) = lvlMainJob;
 
-            ref<uint8>(CharList, 44 + 32 + i * 140) = (uint8)Sql_GetIntData(SqlHandle, 5); // race;
-            ref<uint8>(CharList, 56 + 32 + i * 140) = (uint8)Sql_GetIntData(SqlHandle, 6); // face;
-            ref<uint16>(CharList, 58 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 7); // head;
-            ref<uint16>(CharList, 60 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 8); // body;
-            ref<uint16>(CharList, 62 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 9); // hands;
-            ref<uint16>(CharList, 64 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 10); // legs;
-            ref<uint16>(CharList, 66 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 11); // feet;
-            ref<uint16>(CharList, 68 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 12); // main;
-            ref<uint16>(CharList, 70 + 32 + i * 140) = (uint16)Sql_GetIntData(SqlHandle, 13); // sub;
-
-            ref<uint8>(CharList, 72 + 32 + i * 140) = (uint8)zone;
-            ref<uint16>(CharList, 78 + 32 + i * 140) = zone;*/
-            LobbyView0x24();
-        }
     }
+    #region Structs
+    struct My_Player
+    {
+        public uint ID;
+        public string Name;
+        public byte Job;
+        public byte Level;
+        public byte zone;
+        public Position pos;
+    }
+    struct Position
+    {
+        public float X;
+        public float Y;
+        public float Z;
+        public byte Rot;
+    }
+   struct AccountInfo
+   {
+        public uint ID;
+        public int Char_Slot;
+        public string Username;
+        public string Password;
+   }
+    #endregion
 }
