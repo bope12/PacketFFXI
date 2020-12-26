@@ -24,6 +24,7 @@ namespace HeadlessFFXI
         static Blowfish tpzblowfish;
         static AccountInfo Account_Data; 
         static My_Player Player_Data;
+        static zlib myzlib;
         const int Packet_Head = 28;
         #endregion
         static void Main(string[] args)
@@ -95,6 +96,10 @@ namespace HeadlessFFXI
                 Console.Write("Enter a password:");
                 Account_Data.Password = Console.ReadLine();
             }
+            #endregion
+            #region Zlib testing
+            myzlib = new zlib();
+            myzlib.Init();
             #endregion
             Account_Login();
         }
@@ -411,28 +416,47 @@ namespace HeadlessFFXI
                     }
                     System.Buffer.BlockCopy(deblown, 0, receiveBytes, Packet_Head, k);
                     //Deblowfished
-                    //Console.WriteLine("Decode:   " + BitConverter.ToString(receiveBytes).Replace("-", " "));
+                    Console.WriteLine("Decode:   " + BitConverter.ToString(receiveBytes).Replace("-", " "));
 
 
                     //TODO Unzlib the packet
                     //Zlib compress's all but header
-
-
                     //uint packetsize = BitConverter.ToUInt32(receiveBytes, receiveBytes.Length - 4 - 16); //Location of packetsize set by encoding by server
-                    //byte[] buffer = new byte[deblown.Length + 2];
-                    //buffer[0] = 0x78;
-                    //buffer[1] = 0x01;
-                    //System.Buffer.BlockCopy(deblown, 0, buffer,2, deblown.Length);
-             
-                    //DeflateStream decompress = new DeflateStream(new MemoryStream(buffer), CompressionMode.Decompress);
-                    //MemoryStream finaloutput = new MemoryStream();
+                    byte[] buffer = new byte[deblown.Length - 21];
+                    System.Buffer.BlockCopy(deblown, 1, buffer, 0, buffer.Length-20);
+                    Console.WriteLine("buffersize:{0:G}",buffer.Length);
+                    uint w = 0;
+                    uint pos = myzlib.jump[0];
+                    int packetsize = buffer.Length;
+                    byte[] outbuf = new byte[1750];
+                    //data = buffer
+                    // Resolve the next address in jump table (0 == no jump, 1 == next address)
+                    //(table[i / 8] >> (i & 7)) & 1)
+                    //tldr  check each bit in each byte, if its a 1 move up in the jump table otherwise do not,
+                    //once spot 0 and 1 in the jump table are zero our data is going to be spot 3
+                    for (int i = 0; i < packetsize*8 && w < 1750; ++i)
+                    {
+                        int s = ((buffer[i / 8] >> (i & 7)) & 1);
+                        pos = myzlib.jump[pos + s];
+                        // Repeat until there is nowhere to jump to
+                        if (myzlib.jump[pos] != 0 || myzlib.jump[pos+1] != 0)
+                            continue;
 
-                    //decompress.CopyTo(finaloutput);
-
-                    //byte type = finaloutput.ToArray()[0];
-                    //byte size = finaloutput.ToArray()[1];
-                    //Console.WriteLine("Received packet:" + type + " Size:" + size);
-                }
+                        outbuf[w++] = BitConverter.GetBytes(myzlib.jump[pos+3])[0];
+                        pos = myzlib.jump[0];
+                    }
+                    Console.WriteLine("Dezlib:   " + BitConverter.ToString(outbuf).Replace("-", " "));
+                    /*
+                    byte[] buffer = new byte[receiveBytes.Length - Packet_Head - 20 -1];
+                    System.Buffer.BlockCopy(receiveBytes, Packet_Head+1, buffer,0, receiveBytes.Length - Packet_Head - 21);     
+                    DeflateStream decompress = new DeflateStream(new MemoryStream(buffer), CompressionMode.Decompress);
+                    MemoryStream finaloutput = new MemoryStream();
+                    decompress.CopyTo(finaloutput);
+                    */
+                    byte type = outbuf[0];
+                        byte size = outbuf[1];
+                        Console.WriteLine("Received packet:" + type + " Size:" + size);
+                    }
                 catch(SocketException d)
                 {
                     Console.WriteLine("[Game]Connection lost or refused, Exiting");
