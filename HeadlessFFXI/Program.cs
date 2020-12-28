@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Net;
 using System.IO.Compression;
+using System.Diagnostics;
 
 namespace HeadlessFFXI
 {
@@ -100,6 +101,39 @@ namespace HeadlessFFXI
             #region Zlib testing
             myzlib = new zlib();
             myzlib.Init();
+            /*
+            FileStream fs = new FileStream(@"C:\Users\bope\Documents\Zlib", FileMode.Open);
+            MemoryStream ms = new MemoryStream();
+            fs.CopyTo(ms);
+            byte[] buffer = ms.ToArray();
+            Console.WriteLine(BitConverter.ToString(buffer).Replace("-", " "));
+            Console.WriteLine("buffersize:{0:G}", buffer.Length);
+            uint w = 0;
+            uint pos = myzlib.jump[0];
+            int packetsize = buffer.Length;
+            byte[] outbuf = new byte[1750];
+            //data = buffer
+            // Resolve the next address in jump table (0 == no jump, 1 == next address)
+            //(table[i / 8] >> (i & 7)) & 1)
+            //tldr  check each bit in each byte, if its a 1 move up in the jump table otherwise do not,
+            //once spot 0 and 1 in the jump table are zero our data is going to be spot 3
+            for (int i = 0; i < packetsize * 8 && w < 1750; ++i)
+            {
+                int s = ((buffer[i / 8] >> (i & 7)) & 1);
+                pos = myzlib.jump[pos + s];
+                //Console.WriteLine("{0:G} : {1:G}  0,1 {2:G},{3:G}", s, pos, myzlib.jump[pos], myzlib.jump[pos+1]);
+                // Repeat until there is nowhere to jump to
+                if (myzlib.jump[pos] != 0 || myzlib.jump[pos + 1] != 0)
+                {
+                    //Console.WriteLine("Pos:{0:G} not both zero", pos);
+                    continue;
+                }
+                //Console.WriteLine("DATA:{0:G}", myzlib.jump[pos + 3]);
+                outbuf[w++] = BitConverter.GetBytes(myzlib.jump[pos + 3])[0];
+                pos = myzlib.jump[0];
+            }
+            //Console.WriteLine("Dezlib:   " + BitConverter.ToString(outbuf).Replace("-", " "));
+            */
             #endregion
             Account_Login();
         }
@@ -416,47 +450,49 @@ namespace HeadlessFFXI
                     }
                     System.Buffer.BlockCopy(deblown, 0, receiveBytes, Packet_Head, k);
                     //Deblowfished
-                    Console.WriteLine("Decode:   " + BitConverter.ToString(receiveBytes).Replace("-", " "));
+                    //Console.WriteLine("Decode:   " + BitConverter.ToString(receiveBytes).Replace("-", " "));
 
 
                     //TODO Unzlib the packet
                     //Zlib compress's all but header
-                    //uint packetsize = BitConverter.ToUInt32(receiveBytes, receiveBytes.Length - 4 - 16); //Location of packetsize set by encoding by server
-                    byte[] buffer = new byte[deblown.Length - 21];
-                    System.Buffer.BlockCopy(deblown, 1, buffer, 0, buffer.Length-20);
-                    Console.WriteLine("buffersize:{0:G}",buffer.Length);
-                    uint w = 0;
+                    uint packetsize = BitConverter.ToUInt32(receiveBytes, receiveBytes.Length - 4 - 16);// - 20; //Location of packetsize set by encoding by server
+
+                  
+                    byte[] buffer = new byte[receiveBytes.Length - 20 - Packet_Head];
+                    System.Buffer.BlockCopy(receiveBytes, Packet_Head +1, buffer, 0, buffer.Length-20);
+                    Console.WriteLine("ToDelib:   " + BitConverter.ToString(buffer).Replace("-", " "));
+
+
+                    int w = 0;
                     uint pos = myzlib.jump[0];
-                    int packetsize = buffer.Length;
                     byte[] outbuf = new byte[1750];
-                    //data = buffer
-                    // Resolve the next address in jump table (0 == no jump, 1 == next address)
-                    //(table[i / 8] >> (i & 7)) & 1)
-                    //tldr  check each bit in each byte, if its a 1 move up in the jump table otherwise do not,
-                    //once spot 0 and 1 in the jump table are zero our data is going to be spot 3
-                    for (int i = 0; i < packetsize*8 && w < 1750; ++i)
+                    Console.WriteLine(buffer.Length + ":" + packetsize);
+                    for (int i = 0; i < packetsize && w < 1750; ++i)
                     {
                         int s = ((buffer[i / 8] >> (i & 7)) & 1);
                         pos = myzlib.jump[pos + s];
-                        // Repeat until there is nowhere to jump to
-                        if (myzlib.jump[pos] != 0 || myzlib.jump[pos+1] != 0)
+                        //Console.WriteLine("{0:G} : {1:G}  0,1 {2:G},{3:G}", s, pos, myzlib.jump[pos], myzlib.jump[pos+1]);
+                        if (myzlib.jump[pos] != 0 || myzlib.jump[pos + 1] != 0)
+                        {
+                            //Console.WriteLine("Pos:{0:G} not both zero", pos);
                             continue;
-
-                        outbuf[w++] = BitConverter.GetBytes(myzlib.jump[pos+3])[0];
+                        }
+                        //Console.WriteLine("DATA:{0:G}", myzlib.jump[pos + 3]);
+                        outbuf[w++] = BitConverter.GetBytes(myzlib.jump[pos + 3])[0];
                         pos = myzlib.jump[0];
                     }
-                    Console.WriteLine("Dezlib:   " + BitConverter.ToString(outbuf).Replace("-", " "));
-                    /*
-                    byte[] buffer = new byte[receiveBytes.Length - Packet_Head - 20 -1];
-                    System.Buffer.BlockCopy(receiveBytes, Packet_Head+1, buffer,0, receiveBytes.Length - Packet_Head - 21);     
-                    DeflateStream decompress = new DeflateStream(new MemoryStream(buffer), CompressionMode.Decompress);
-                    MemoryStream finaloutput = new MemoryStream();
-                    decompress.CopyTo(finaloutput);
-                    */
-                    byte type = outbuf[0];
-                        byte size = outbuf[1];
-                        Console.WriteLine("Received packet:" + type + " Size:" + size);
+                    byte[] final = new byte[w];
+                    System.Buffer.BlockCopy(outbuf, 0, final, 0, w);
+                    Console.WriteLine("Dezlib size:" +final.Length+ "\n" + BitConverter.ToString(final).Replace("-", " "));
+                    int index = 0;
+                    while (index < final.Length)
+                    {
+                        int type = BitConverter.ToUInt16(final, index) & 0x1FF;
+                        int size = final[index+1] & 0x0FE;
+                        index += size *2;
+                        Console.WriteLine("Received packet:{0:G}: Size:{1:G}", type, size);
                     }
+                }
                 catch(SocketException d)
                 {
                     Console.WriteLine("[Game]Connection lost or refused, Exiting");

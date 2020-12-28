@@ -19,6 +19,8 @@
 ===========================================================================
 */
 using System;
+using System.Diagnostics;
+
 namespace HeadlessFFXI
 {
 	class Blowfish
@@ -417,7 +419,7 @@ namespace HeadlessFFXI
 
 			Xr = Xr ^ P[N];
 			Xl = Xl ^ P[N + 1];
-
+			//Console.WriteLine("Xr:{0:G} Xl:{1:G}", Xr, Xl);
 			xl = Xl;
 			xr = Xr;
 
