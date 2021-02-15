@@ -41,6 +41,7 @@ namespace HeadlessFFXI
                 jump[i] = jumps[i];
                 //Console.WriteLine("i:{0:G} data: {1:G}", i, jump[i]);
             }
+            fs.Close();
         }
         private static uint[] Load_File(FileStream fs)
         {
