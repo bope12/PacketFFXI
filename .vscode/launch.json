@@ -1,0 +1,15 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch",
+            "type": "coreclr",
+            "request": "launch",
+            "args": ["-user bopey", "-pass password12"],
+            "program": "${workspaceFolder}/HeadlessFFXI/bin/Debug/net9/HeadlessFFXI.exe"
+        }
+    ]
+}

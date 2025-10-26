@@ -8,13 +8,14 @@ using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace HeadlessFFXI
 {
     class Program
     {
         public static Client User;
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             #region Settings
             Config settings = new Config();
@@ -71,7 +72,7 @@ namespace HeadlessFFXI
             else
             {
                 Console.WriteLine("[Cfg]No login information provided, Move config file into folder with exe or add launch args with -user user -pass pass -slot #");
-                Exit();
+                //Exit();
             }
             if (settings.user == null)
             {
@@ -86,11 +87,12 @@ namespace HeadlessFFXI
                 settings.password = Console.ReadLine();
             }
             #endregion
-            User = new Client(settings,false,true);
-            User.Login();
-            Thread.Sleep(100);
+            User = new Client(settings,true,false);
+            await User.Login();
+            Thread.Sleep(2000000);
             User.Logout();
             Exit();
+            return;
         }
         static void Exit()
         {

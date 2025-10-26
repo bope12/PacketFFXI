@@ -8,6 +8,14 @@ using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Text;
+using System.Net.Security;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Linq;
+using System.Security.AccessControl;
 
 
 namespace HeadlessFFXI
@@ -16,12 +24,13 @@ namespace HeadlessFFXI
     {
         #region Vars
         const int Packet_Head = 28;
-        uint[] startingkey = { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xAD5DE056 };
+        uint[] startingkey = { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xAD5DE056 }; // ;
         public bool chardata;
         bool silient;
         Blowfish tpzblowfish;
         AccountInfo Account_Data;
         My_Player Player_Data;
+        Entity[] Entity_List = new Entity[4096];
         zlib myzlib;
         string loginserver = "127.0.0.1";
         TcpClient lobbyview;
@@ -30,8 +39,10 @@ namespace HeadlessFFXI
         NetworkStream datastream;
         IPEndPoint RemoteIpEndPoint;
         UdpClient Gameserver;
-        static MD5 hasher = MD5.Create();
+        static MD5 hasher = System.Security.Cryptography.MD5.Create();
         UInt16 PDcode = 1;
+        UInt16 ClientPacketID = 1;
+        UInt16 ServerPacketID = 1;
         public event EventHandler IncomingChat;
         Thread Incoming;
         Thread Logic;
@@ -48,22 +59,65 @@ namespace HeadlessFFXI
             chardata = Full;
             silient = log;
         }
-        public void Login()
+        public async Task<bool> Login()
         {
+            Console.SetOut(new TimestampTextWriter(Console.Out));
             myzlib = new zlib();
             myzlib.Init();
             //Console.WriteLine("[Info]Attempting to login");
             try
             {
                 TcpClient client = new TcpClient(loginserver, 54231);
-                NetworkStream stream = client.GetStream();
-                Byte[] data = new Byte[33];
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Username), 0, data, 0, Account_Data.Username.Length);
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Password), 0, data, 16, Account_Data.Password.Length);
-                data[32] = 0x10;
-                stream.Write(data, 0, 33);
-                byte[] indata = new Byte[16];
-                stream.Read(indata, 0, 16);
+
+                using var sslStream = new SslStream(
+                client.GetStream(),
+                leaveInnerStreamOpen: false,
+                userCertificateValidationCallback: (sender, certificate, chain, sslPolicyErrors) => true // ⚠️ Only for testing!
+                );
+
+                Byte[] data = new Byte[102];
+                data[0x00] = 0xFF;
+                data[0x01] = 0;
+                data[0x02] = 0;
+                data[0x03] = 0;
+                data[0x04] = 0;
+                data[0x05] = 0;
+                data[0x06] = 0;
+                data[0x07] = 0;
+                data[0x08] = 0;
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Username), 0, data, 0x09, Account_Data.Username.Length);
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Password), 0, data, 0x19, Account_Data.Password.Length);
+
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Password), 0, data, 0x30, Account_Data.Password.Length);
+                data[0x39] = 0x10;
+
+                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes("1.1.1"), 0, data, 0x61, 5);
+                var options = new SslClientAuthenticationOptions
+                {
+                    TargetHost = loginserver,
+                    EnabledSslProtocols = SslProtocols.Tls13, // <-- This is the key line
+                    CertificateRevocationCheckMode = X509RevocationMode.NoCheck
+                };
+
+                try
+                {
+                    await sslStream.AuthenticateAsClientAsync(options);
+                    Console.WriteLine($"Connected using {sslStream.SslProtocol}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Handshake failed: {ex.GetType().Name} - {ex.Message}");
+                    if (ex.InnerException != null)
+                        Console.WriteLine($"Inner: {ex.InnerException.GetType().Name} - {ex.InnerException.Message}");
+                }
+
+                await sslStream.WriteAsync(data, 0, 102);
+                await sslStream.FlushAsync();
+
+                byte[] indata = new Byte[21];
+                int bytesRead = await sslStream.ReadAsync(indata.AsMemory(0, 21));
+                sslStream.Close();
+
                 switch (indata[0])
                 {
                     case 0x0001: //Login Success
@@ -71,22 +125,34 @@ namespace HeadlessFFXI
                         Account_Data.ID = BitConverter.ToUInt32(indata, 1);
                         if (!silient)
                             Console.WriteLine("[Info]Account id:{0:D}", Account_Data.ID);
-                        lobbydata = new TcpClient(loginserver, 54230);
+                        Account_Data.SessionHash = new byte[16];
+                        System.Buffer.BlockCopy(indata, 5, Account_Data.SessionHash, 0, 16);
+                        lobbydata = new TcpClient(AddressFamily.InterNetwork);
+                        await lobbydata.ConnectAsync(loginserver, 54230);
                         datastream = lobbydata.GetStream();
-                        LobbyData();
-                        LobbyView0x26();
+                        Byte[] dataByte = new Byte[28];
+                        dataByte[0] = 0xFE;
+                        System.Buffer.BlockCopy(Account_Data.SessionHash, 0, dataByte, 12, Account_Data.SessionHash.Length);
+                        await datastream.WriteAsync(dataByte, 0, dataByte.Length);
+
+                        await LobbyDataA1();
+                        await LobbyView0x26();
+                        await LobbyView0x1F();
+                        await LobbyData0xA1();
+                        await LobbyView0x24();
+                        await LobbyView0x07();
+                        await LobbyData0xA2();
                         break;
                     case 0x0002:
                         if (!silient)
                             Console.WriteLine("[Login]Login failed,Trying to create the account");
-                        Account_Creation(data);
+                        await AccountCreation(data);
                         break;
                     default:
                         if (!silient)
                             Console.WriteLine("[Login]Login failed Unsure Code:" + indata[0]);
                         break;
                 }
-                stream.Close();
                 client.Close();
             }
             catch (SocketException d)
@@ -103,15 +169,16 @@ namespace HeadlessFFXI
                         break;
                 }
             }
+            return false;
         }
-        void Account_Creation(byte[] data)
+        async Task AccountCreation(byte[] data)
         {
             TcpClient client = new TcpClient(loginserver, 54231);
             NetworkStream stream = client.GetStream();
             data[32] = 0x20;
-            stream.Write(data, 0, 33);
+            await stream.WriteAsync(data, 0, 33);
             byte[] indata = new Byte[1];
-            stream.Read(indata, 0, 1);
+            await stream.ReadAsync(indata, 0, 1);
             switch (indata[0])
             {
                 case 0x03: //Account creation success
@@ -135,60 +202,65 @@ namespace HeadlessFFXI
                     break;
             }
         }
+
         //Setup connection to the lobbyData handler
-        void LobbyData()
+        async Task LobbyDataA1()
         {
-            byte[] dat = new byte[1]; //1
-            dat[0] = 0xA1;
-            byte[] id = BitConverter.GetBytes(Account_Data.ID);
-            byte[] data = new byte[dat.Length + id.Length];
-            System.Buffer.BlockCopy(dat, 0, data, 0, dat.Length);
-            System.Buffer.BlockCopy(id, 0, data, dat.Length, id.Length);
+            byte[] data = new byte[28];
+            data[0] = 0xA1;
+            System.Buffer.BlockCopy(BitConverter.GetBytes(Account_Data.ID), 0, data, 1, 4);
+            System.Buffer.BlockCopy(((System.Net.IPEndPoint)lobbydata.Client.RemoteEndPoint).Address.GetAddressBytes(), 0, data, 5, 4);
+            System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
             datastream.Write(data, 0, data.Length);
         }
+
         //The rest of the login process is a linary set of send receive packets with both the lobbyData and lobbyView connections
         //Client ver check, receive information about account
-        void LobbyView0x26()
+        async Task LobbyView0x26()
         {
-            lobbyview = new TcpClient(loginserver, 54001);
+            lobbyview = new TcpClient(AddressFamily.InterNetwork);
+            await lobbyview.ConnectAsync(loginserver, 54001);
             viewstream = lobbyview.GetStream();
-            Byte[] ver = System.Text.Encoding.ASCII.GetBytes("30201200_0");
+
+            Byte[] ver = System.Text.Encoding.ASCII.GetBytes("30250800_0");
             Byte[] data = new byte[152];
             data[8] = 0x26;
             System.Buffer.BlockCopy(ver, 0, data, 116, 10);
-            viewstream.Write(data, 0, 152);
+            System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
+            await viewstream.WriteAsync(data, 0, 152);
             data = new Byte[40];
-            viewstream.Read(data, 0, 40);
+            await viewstream.ReadAsync(data, 0, 40);
             //Console.WriteLine("[Info]Expantion Bitmask:{0:D}", BitConverter.ToUInt16(data, 32));
             //Console.WriteLine("[Info]Feature Bitmask:{0:D}", BitConverter.ToUInt16(data, 36));
-            LobbyView0x1F();
         }
-        void LobbyView0x1F()
+
+        async Task LobbyView0x1F()
         {
             Byte[] data = new byte[44];
             data[8] = 0x1F;
-            viewstream.Write(data, 0, 44);
-            LobbyData0xA1();
+            System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
+            await viewstream.WriteAsync(data, 0, 44);
         }
+
         //Request char list
-        void LobbyData0xA1()
+        async Task LobbyData0xA1()
         {
-            Byte[] data = new Byte[9];
-            Byte[] ip = BitConverter.GetBytes(((uint)16777343)); //This does not seem to really matter
-            System.Buffer.BlockCopy(ip, 0, data, 0, ip.Length);
+            Byte[] data = new Byte[28];
+            System.Buffer.BlockCopy(BitConverter.GetBytes(Account_Data.ID), 0, data, 1, 4);
+            System.Buffer.BlockCopy(((System.Net.IPEndPoint)lobbydata.Client.RemoteEndPoint).Address.GetAddressBytes(), 0, data, 5, 4);
             data[0] = 0xA1;
             //datastream.Flush();
-            datastream.Write(data);
+            await datastream.WriteAsync(data);
             data = new byte[328];
-            datastream.Read(data, 0, 328);
+            await datastream.ReadAsync(data, 0, 328);
             data = new byte[2272];
-            viewstream.Read(data, 0, 2272);
+            await viewstream.ReadAsync(data, 0, 2272);
             if (BitConverter.ToUInt32(data, 36) != 0)
             {
                 if (BitConverter.ToUInt32(data, 36 + (Account_Data.Char_Slot * 140)) != 0)
                 {
                     Player_Data.ID = BitConverter.ToUInt32(data, 36 + (Account_Data.Char_Slot * 140));
-                    Player_Data.Name = System.Text.Encoding.UTF8.GetString(data, 44 + (Account_Data.Char_Slot * 140), 16);
+                    Player_Data.Name = System.Text.Encoding.UTF8.GetString(data, 44 + (Account_Data.Char_Slot * 140), 16).TrimEnd('\0');
                     Player_Data.Job = data[46 + 32 + (Account_Data.Char_Slot * 140)];
                     Player_Data.Level = data[73 + 32 + (Account_Data.Char_Slot * 140)];
                     Player_Data.zoneid = data[72 + 32 + (Account_Data.Char_Slot * 140)];
@@ -199,7 +271,7 @@ namespace HeadlessFFXI
                         Console.WriteLine("[Info]No charater in slot:{0:G} defaulting to slot 1", (Account_Data.Char_Slot + 1));
                     Account_Data.Char_Slot = 0;
                     Player_Data.ID = BitConverter.ToUInt32(data, 36);
-                    string name = System.Text.Encoding.UTF8.GetString(data, 44, 16);
+                    string name = System.Text.Encoding.UTF8.GetString(data, 44, 16).TrimEnd('\0');
                     Player_Data.Name = name.Substring(0, name.IndexOfAny(new char[] { ' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' }));
                     Player_Data.Job = data[46 + 32];
                     Player_Data.Level = data[73 + 32];
@@ -207,7 +279,6 @@ namespace HeadlessFFXI
                 }
                 if (!silient)
                     Console.WriteLine("[Info]Name:{0:G} CharID:{1:D} Job:{2:D} Level:{3:D}", new object[] { Player_Data.Name, Player_Data.ID, Player_Data.Job, Player_Data.Level });
-                LobbyView0x24();
             }
             else
             {
@@ -277,7 +348,7 @@ namespace HeadlessFFXI
             }
         }
 
-        async void LobbyView0x24()
+        async Task LobbyView0x24()
         {
             /*
             byte[] data = new byte[44];
@@ -305,30 +376,40 @@ namespace HeadlessFFXI
             if (!silient)
                 Console.WriteLine("[Info]{0:G} Server", System.Text.Encoding.UTF8.GetString(data, 36, 16));
             */
-            LobbyView0x07();
         }
-        void LobbyView0x07()
+
+        async Task LobbyView0x07()
         {
             Byte[] data = new byte[88];
             data[8] = 0x07;
             Byte[] id = BitConverter.GetBytes(Player_Data.ID);
             System.Buffer.BlockCopy(id, 0, data, 28, id.Length);
-            viewstream.Write(data, 0, 88);
-            LobbyData0xA2();
+            System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Player_Data.Name), 0, data, 36, Player_Data.Name.Length);
+            System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
+            await viewstream.WriteAsync(data, 0, 88);
         }
+
         // Packet with key for blowfish
-        void LobbyData0xA2()
+        async Task LobbyData0xA2()
         {
-            byte[] data = { 0xA2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0xE0, 0x5D, 0xAD, 0x00, 0x00, 0x00, 0x00 };
-            Thread.Sleep(500);
-            datastream.Write(data, 0, 25);
-            data = new byte[0x48];
-            viewstream.Read(data, 0, 0x48);
+            viewstream.Flush();
+            //Starting Key
+            byte[] data = {
+                0xA2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0xE0, 0x5D, 0xAD, 0x00, //,
+                0x00, 0x00, 0x00 };
+            Thread.Sleep(2000);
+            await datastream.WriteAsync(data, 0, 25);
+            data = new byte[72];
+            await viewstream.ReadExactlyAsync(data.AsMemory(0, 72));
+            Console.WriteLine("LobbyData0xA2 received:");
+            Console.WriteLine(BitConverter.ToString(data, 0, 72));
             uint error = BitConverter.ToUInt16(data, 32);
             switch (error)
             {
                 case 305:
                 case 321:
+                case 201:
                     if (!silient)
                         Console.WriteLine("[Login]Failed to pass us to the gameserver: " + error);
                     return;
@@ -342,7 +423,7 @@ namespace HeadlessFFXI
             uint searchport = BitConverter.ToUInt16(data, 0x44);
             RemoteIpEndPoint = new IPEndPoint(zoneip, Convert.ToInt32(zoneport));
             if (!silient)
-                Console.WriteLine("[Login]Handed off to gameserver " + zoneip + ":" + zoneport);
+                Console.WriteLine("[Login]Handed off to gameserver " + RemoteIpEndPoint.Address + ":" + zoneport);
             GameserverStart();
         }
         #endregion
@@ -354,6 +435,65 @@ namespace HeadlessFFXI
             tomd5 = hasher.ComputeHash(tomd5);
             System.Buffer.BlockCopy(tomd5, 0, data, data.Length - 16, 16);
         }
+
+        static void packet_SetType(ref byte[] data, UInt16 typeIn)
+        {
+            ushort type = (ushort)(typeIn & 0x1FF);
+            data[Packet_Head] = (byte)(type & 0xFF);   // lower 8 bits of type
+        }
+
+        static void packet_SetSize(ref byte[] data, UInt16 sizeIn)
+        {
+            byte size = (byte)(sizeIn & 0xFE);
+            data[Packet_Head + 1] = (byte)(size & 0xFE); // second byte replaced with size
+        }
+
+        public void packet_Compress(ref byte[] data)
+        {
+            byte[] buffer = new byte[1800];
+            byte[] input = new byte[data.Length - Packet_Head];
+            System.Buffer.BlockCopy(data, Packet_Head, input, 0, data.Length - Packet_Head);
+            //Lets Compress this packet
+            var finalsize = myzlib.ZlibCompress(input, ref buffer);
+            Array.Resize(ref buffer, finalsize);
+            input = new byte[Packet_Head + finalsize + 16];
+            Array.Copy(buffer, 0, input, Packet_Head, finalsize);
+            Array.Copy(data, 0, input, 0, Packet_Head);
+            data = input;
+
+            input = BitConverter.GetBytes(finalsize);
+            System.Buffer.BlockCopy(input, 0, data, data.Length - 20, input.Length);
+
+            // Console.WriteLine("Compressed 0x11 size {0:G}", finalsize);
+        }
+
+        public void packet_Encode(ref byte[] data)
+        {
+            //Lets encipher this packet
+            uint CypherSize = (uint)((data.Length / 4) & ~1); // same as & -2
+
+            for (uint j = 0; j < CypherSize; j += 2)
+            {
+                int offset1 = (int)(4 * (j + 7));
+                int offset2 = (int)(4 * (j + 8));
+
+                // If not enough bytes remain for a full 64-bit block, skip
+                if (offset2 + 4 > data.Length)
+                    break;
+
+                // Read two 32-bit words from buff
+                uint xl = BitConverter.ToUInt32(data, offset1);
+                uint xr = BitConverter.ToUInt32(data, offset2);
+
+                // Encrypt the pair
+                tpzblowfish.Blowfish_encipher(ref xl, ref xr);
+
+                // Write them back into the buffer
+                Array.Copy(BitConverter.GetBytes(xl), 0, data, offset1, 4);
+                Array.Copy(BitConverter.GetBytes(xr), 0, data, offset2, 4);
+            }
+        }
+
         //static void packet_head()
         //static void blowfish.en
         //static void blowfish.de
@@ -400,7 +540,7 @@ namespace HeadlessFFXI
                 viewstream.Close();
             }
         }
-        void GameserverStart()
+        async Task GameserverStart()
         {
             Gameserver = new UdpClient();
             Gameserver.Connect(RemoteIpEndPoint);
@@ -422,9 +562,15 @@ namespace HeadlessFFXI
                     UInt16 server_packet_id = BitConverter.ToUInt16(receiveBytes, 0);
                     UInt16 client_packet_id = BitConverter.ToUInt16(receiveBytes, 2);
                     UInt32 packet_time = BitConverter.ToUInt32(receiveBytes, 8);
-                    //Console.WriteLine("[Game]Incoming Packet Serverid:" + server_packet_id + " Clientid:" + client_packet_id + " sent at:" + packet_time + " RawSize:" + receiveBytes.Length);
-                    //Raw
-                    //Console.WriteLine("Incoming: " + BitConverter.ToString(receiveBytes).Replace("-", " "));
+                    ServerPacketID = server_packet_id;
+
+                    //// Raw
+                    //string[] bytes = BitConverter.ToString(receiveBytes).Split('-');
+                    //for (int i = 0; i < bytes.Length; i += 16)
+                    //{
+                    //    Console.WriteLine("Incoming: " + string.Join(" ", bytes.Skip(i).Take(16)));
+                    //}
+
                     byte[] deblown = new byte[receiveBytes.Length - Packet_Head];
                     byte[] blowhelper;
                     int k = 0;
@@ -441,18 +587,22 @@ namespace HeadlessFFXI
                     }
                     System.Buffer.BlockCopy(deblown, 0, receiveBytes, Packet_Head, k);
                     //Deblowfished
-                    //Console.WriteLine("Decode:   " + BitConverter.ToString(receiveBytes).Replace("-", " "));
+                    //bytes = BitConverter.ToString(receiveBytes).Split('-');
+                    //for (int i = 0; i < bytes.Length; i += 16)
+                    //{
+                    //    Console.WriteLine("Decode:   " + string.Join(" ", bytes.Skip(i).Take(16)));
+                    //}
                     //Zlib compress's all but header
-                    uint packetsize = BitConverter.ToUInt32(receiveBytes, receiveBytes.Length - 4 - 16);// - 20; //Location of packetsize set by encoding by server
+                    uint packetsize = BitConverter.ToUInt32(receiveBytes, receiveBytes.Length - 20);// - 20; //Location of packetsize set by encoding by server
                     //byte[] buffer = new byte[receiveBytes.Length - 21 - Packet_Head];
                     byte[] buffer = new byte[(int)Math.Ceiling(packetsize / 8m)];
                     System.Buffer.BlockCopy(receiveBytes, Packet_Head + 1, buffer, 0, buffer.Length);
                     //Console.WriteLine("ToDelib:   " + BitConverter.ToString(buffer).Replace("-", " "));
                     int w = 0;
                     uint pos = myzlib.jump[0];
-                    byte[] outbuf = new byte[1750];
+                    byte[] outbuf = new byte[4000];
                     //Console.WriteLine(buffer.Length + ":" + packetsize);
-                    for (int i = 0; i < packetsize && w < 1750; i++)
+                    for (int i = 0; i < packetsize && w < 4000; i++)
                     {
                         int s = ((buffer[i / 8] >> (i & 7)) & 1);
                         pos = myzlib.jump[pos + s];
@@ -469,19 +619,25 @@ namespace HeadlessFFXI
                     }
                     byte[] final = new byte[w];
                     System.Buffer.BlockCopy(outbuf, 0, final, 0, w);
-                    //Console.WriteLine("Dezlib size:" +final.Length+ "\n" + BitConverter.ToString(final).Replace("-", " "));
+
+                    //Console.WriteLine("Dezlib size:" + final.Length);
+                    //bytes = BitConverter.ToString(final).Split('-');
+                    //for (int i = 0; i < bytes.Length; i += 16)
+                    //{
+                    //    Console.WriteLine("Dezlib:   " + string.Join(" ", bytes.Skip(i).Take(16)));
+                    //}
+
                     int index = 0;
                     int size = final.Length > 2 ? final[index + 1] & 0x0FE : 0;
+
                     while (index < final.Length && final.Length - index > 2 && size > 0)
                     {
                         int type = BitConverter.ToUInt16(final, index) & 0x1FF;
                         size = final[index + 1] & 0x0FE;
-                        //
+                        //Console.WriteLine("Received packet:{0:X}: Size:{1:X}", type, size);
                         switch (type)
                         {
                             case 0x08://Zones Visited
-                            case 0x0D://Char
-                            case 0x0E://EntityUpdate
                             case 0x1D://InventoryFinish
                             case 0x1F://InventoryAssign
                             case 0x20://Inventory Item
@@ -506,9 +662,17 @@ namespace HeadlessFFXI
                             case 0xCA://BazaarMessage
                             case 0xD2://TreasureFindItem
                             case 0x119://CharRecast
+                                if(receiveBytes.Length > 49)
+                                    Console.WriteLine("[Game]Incoming Unhandled Packet {0:X} Serverid:" + server_packet_id + " Clientid:" + client_packet_id + " sent at:" + packet_time + " Size:" + size, type );
                                 break;
                             case 0x0A:
                                 P00A(final, size, index);//Zone In
+                                break;
+                            case 0x0D://Char Update
+                                P00D(final, size, index);
+                                break;
+                            case 0x0E://EntityUpdate
+                                P00E(final, size, index);
                                 break;
                             case 0x17:
                                 P017(final, size, index);//Chat Messagae
@@ -532,8 +696,8 @@ namespace HeadlessFFXI
                                 P0DF(final, size, index);//Char/trust Health
                                 break;
                             default:
-                                if (!silient)
-                                    Console.WriteLine("Received packet:{0:X}: Size:{1:X}", type, size);
+                                if(receiveBytes.Length > 49)
+                                    Console.WriteLine("[Game]Incoming Unhandled Packet {0:X} Serverid:" + server_packet_id + " Clientid:" + client_packet_id + " sent at:" + packet_time + " Size:" + size, type );
                                 break;
 
                         }
@@ -551,40 +715,66 @@ namespace HeadlessFFXI
         void Logintozone()
         {
             startingkey[4] += 2;
-            byte[] byteArray = new byte[startingkey.Length * 4];
-            Buffer.BlockCopy(startingkey, 0, byteArray, 0, startingkey.Length * 4);
-            //Console.WriteLine("[Info]Blowfish key:" + BitConverter.ToString(byteArray).Replace("-", "").TrimStart('0'));
-            byte[] hashkey;
-            hashkey = hasher.ComputeHash(byteArray);
+
+            byte[] byteArray = new byte[startingkey.Length * sizeof(uint)];
+            Buffer.BlockCopy(startingkey, 0, byteArray, 0, byteArray.Length);
+            byte[] hashkey = hasher.ComputeHash(byteArray, 0, 20);
+
             for (int i = 0; i < 16; ++i)
             {
                 if (hashkey[i] == 0)
                 {
-                    byte[] zero = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-                    System.Buffer.BlockCopy(zero, i, hashkey, i, 16 - i);
+                    Array.Clear(hashkey, i, 16 - i);
+                    break;
                 }
             }
-            //Console.WriteLine("[Info]Blowfish hash:" + BitConverter.ToString(hashkey).Replace("-", " "));
+
+            // Console.WriteLine("[Info]Blowfish key:" + BitConverter.ToString(byteArray).Replace("-", " "));
+            // Console.WriteLine("[Info]Blowfish hash:" + BitConverter.ToString(hashkey).Replace("-", " "));
+
             tpzblowfish = new Blowfish();
             tpzblowfish.Init(hashkey, 16);
 
             #region ZoneInpackets
             byte[] data = new byte[136];
-            byte[] input = BitConverter.GetBytes(PDcode); //Packet count
+            byte[] input = BitConverter.GetBytes(ClientPacketID); //Packet count
             System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
             input = BitConverter.GetBytes(((UInt16)0x0A)); //Packet type
             System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
             input = new byte[] { 0x2E }; //Size
             System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
-            input = BitConverter.GetBytes(PDcode); //Packet count
+            input = BitConverter.GetBytes(ClientPacketID); //Packet count
             System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
             input = BitConverter.GetBytes(Player_Data.ID);
             System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x0C, input.Length);
+
+
+            byte checksum = 0;
+
+            const int checksumOffset = Packet_Head + 0x03;
+            const int checksumLength = 84;
+
+            for (int i = 0; i < checksumLength; i++)
+            {
+                checksum += data[checksumOffset + i];
+            }
+            Console.WriteLine("Checksum: " + checksum);
+
+            data[Packet_Head + 0x04] = checksum;
+
+
+
             packet_addmd5(ref data);
             if (!silient)
                 Console.WriteLine("[Game]Outgoing packet 0x0A, Zone in");
             try
             {
+                Thread.Sleep(2000);
+                Gameserver.Send(data, data.Length);
+                Thread.Sleep(1000);
+                ClientPacketID++;
+                input = BitConverter.GetBytes(ClientPacketID); //Packet count
+                System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
                 Gameserver.Send(data, data.Length);
             }
             catch (SocketException d)
@@ -594,137 +784,17 @@ namespace HeadlessFFXI
                 startingkey[4] -= 2;
                 Logintozone();
             }
-            PDcode++;
-            data = new byte[53];
-            input = BitConverter.GetBytes(PDcode); //Packet count
-            System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
-            input = BitConverter.GetBytes(((UInt16)0x11)); //Packet type
-            System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
-            input = new byte[] { 0x04 }; //Size
-            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
-            input = BitConverter.GetBytes(PDcode); //Packet count
-            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
-            packet_addmd5(ref data);
-            if (!silient)
-                Console.WriteLine("[Game]Outgoing packet 0x11, Zone in confirmation");
-            Gameserver.Send(data, data.Length);
+
             #endregion
-            #region RequestCharInfo
-            if (chardata)
-            {
-                data = new byte[183];
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
-
-                input = BitConverter.GetBytes(((UInt16)0x0C)); //Packet type
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
-                input = new byte[] { 0x06 }; //Size
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
-                int new_Head = Packet_Head + (0x06 * 2);
-
-                input = BitConverter.GetBytes(((UInt16)0x61)); //Packet type
-                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
-                input = new byte[] { 0x04 }; //Size
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
-                new_Head = new_Head + (0x04 * 2);
-
-                input = BitConverter.GetBytes(((UInt16)0x01A)); //Packet type
-                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
-                input = new byte[] { 0x0E }; //Size
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
-                input = new byte[] { 0x14 }; //Action type
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x0A, input.Length);
-                new_Head = new_Head + (0x0E * 2);
-
-                input = BitConverter.GetBytes(((UInt16)0x4B)); //Packet type
-                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
-                input = new byte[] { 0x0C }; //Size
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
-                input = new byte[] { 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; //Language,Timestamp,Lengh,Start offset
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x07, input.Length);
-                new_Head = new_Head + (0x0C * 2);
-
-                input = BitConverter.GetBytes(((UInt16)0x0F)); //Packet type
-                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
-                input = new byte[] { 0x12 }; //Size
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
-                new_Head = new_Head + (0x12 * 2);
-
-                //input = BitConverter.GetBytes(((UInt16)0x0DB)); //Packet type
-                //System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
-                //input = new byte[] { 0x14 }; //Size
-                //System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
-                //input = BitConverter.GetBytes(PDcode); //Packet count
-                //System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
-                //input = new byte[] { 0x02 }; //Language
-                //System.Buffer.BlockCopy(input, 0, data, new_Head + 0x24, input.Length);
-                //new_Head = new_Head + (0x14 * 2);
-
-                input = BitConverter.GetBytes(((UInt16)0x5A)); //Packet type
-                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
-                input = new byte[] { 0x02 }; //Size
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
-                new_Head = new_Head + (0x02 * 2);
-
-                packet_addmd5(ref data);
-                if (!silient)
-                    Console.WriteLine("[Game]Outgoing packet multi,Sending Post zone data requests");
-                Gameserver.Send(data, data.Length);
-                PDcode++;
-            }
-            #endregion
-            float pos = -330;
-            bool plus = true;
-            //Example flow of just walking in a line back and forth
-            while (!abort)
-            {
-                data = new byte[74];
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
-                input = BitConverter.GetBytes(((UInt16)0x15)); //Packet type
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
-                input = new byte[] { 0x10 }; //Size
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
-                input = BitConverter.GetBytes(PDcode); //Packet count
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
-                input = BitConverter.GetBytes(pos);
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x04, input.Length); //Xpos
-                input = BitConverter.GetBytes((float)-481.1);
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x0C, input.Length); //Zpos
-                input = new byte[] { 0x00 };
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x08, input.Length); //Ypos
-                input = BitConverter.GetBytes((UInt16)1);
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x12, input.Length);//steps?
-                input = plus ? new byte[] { 0xE7 } : new byte[] { 0x5A };
-                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x14, input.Length);//rot
-                pos = plus ? pos + .5F : pos - .5F;
-                if (pos > -310F || pos < -333f)
-                    plus = !plus;
-                //Console.WriteLine("[Game]Outgoing packet 0x15, Line dancing Pos:{0:G}", pos);
-                packet_addmd5(ref data);
-                Gameserver.Send(data, data.Length);
-                Thread.Sleep(100);
-            }
-
-            Console.Read();
         }
+
         public void SendTell(String User, String Message)
         {
             byte[] data = new byte[21 + 45 + Packet_Head + 30];
-            byte[] input = BitConverter.GetBytes(PDcode); //Packet count
+            byte[] input = BitConverter.GetBytes(ClientPacketID); //Client Packet Id
             System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
+            input = BitConverter.GetBytes(ServerPacketID); //Server Packet Id
+            System.Buffer.BlockCopy(input, 0, data, 2, input.Length);
             input = BitConverter.GetBytes(((UInt16)0xB6)); //Packet type
             System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
             input = BitConverter.GetBytes(20); //Size
@@ -750,42 +820,52 @@ namespace HeadlessFFXI
             System.Environment.Exit(1);
         }
         #region Incoming Packets
+        // Chat Message
         void P017(byte[] packet, int size, int index)
         {
-            string name = System.Text.Encoding.UTF8.GetString(packet, 0x08, 15);
+
+            var MessageType = packet[index + 0x04];
+            var isGM = packet[index + 0x05] == 0x01;
+            var zoneID = BitConverter.ToUInt16(packet, index + 0x06); // 0x06 can also be MentorRank or MasterRank depending on MessageType
+            string name = System.Text.Encoding.UTF8.GetString(packet, index + 0x08, 15).TrimEnd('\0');
             if (!silient)
-                Console.WriteLine("[Chat]" + name + ":" + System.Text.Encoding.UTF8.GetString(packet, 0x17 + index, 107));
-            //Respond to chat
-            byte[] data = new byte[0x64];
-            byte[] input;
-            input = BitConverter.GetBytes(PDcode); //Packet count
-            System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
-            input = BitConverter.GetBytes(((UInt16)0xB5)); //Packet type
-            System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
-            input = BitConverter.GetBytes(PDcode); //Packet count
-            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
-            data[Packet_Head + 0x04] = 0; //say
-            name = name.Insert(name.Length, " I hear you there buddy");
-            Console.WriteLine(name);
-            input = Encoding.ASCII.GetBytes(name);
-            Console.WriteLine(input.Length);
-            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x06, input.Length);
-            input = BitConverter.GetBytes(10); //Size
-            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
-            packet_addmd5(ref data);
-            Console.WriteLine(data.Length);
-            Gameserver.Send(data, data.Length);
+                Console.WriteLine("[Chat]" + name + ":" + System.Text.Encoding.UTF8.GetString(packet, index + 0x17, 107).TrimEnd('\0'));
+            // //Respond to chat
+            // byte[] data = new byte[0x64];
+            // byte[] input = BitConverter.GetBytes(ClientPacketID); //Client Packet Id
+            // System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
+            // input = BitConverter.GetBytes(ServerPacketID); //Server Packet Id
+            // System.Buffer.BlockCopy(input, 0, data, 2, input.Length);
+            //
+            // input = BitConverter.GetBytes(((UInt16)0xB5)); //Packet type
+            // System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
+            //
+            // input = BitConverter.GetBytes(ClientPacketID); //Packet count
+            // System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
+            // data[Packet_Head + 0x04] = 0; //say
+            // name = name.Insert(name.Length, " I hear you there buddy");
+            // Console.WriteLine(name);
+            // input = Encoding.ASCII.GetBytes(name);
+            // Console.WriteLine(input.Length);
+            // System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x06, input.Length);
+            // input = BitConverter.GetBytes(10); //Size
+            // System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
+            // packet_addmd5(ref data);
+            // Console.WriteLine(data.Length);
+            // Gameserver.Send(data, data.Length);
             IncomingChat?.Invoke(this, EventArgs.Empty);
         }
+        // Server Message
         void P04D(byte[] packet, int size, int index)
         {
             uint length = BitConverter.ToUInt32(packet, 0x14 + index);
             if (!silient)
                 Console.WriteLine("[SMES]" + System.Text.Encoding.UTF8.GetString(packet, 0x18 + index, (int)length));
         }
+        // CCharJobsPacket
         void P01B(byte[] packet, int size, int index)
         {
-            if (size == 0x34)
+            if (size == 0x84)
             {
                 //memcpy(data + (0x0C), &PChar->jobs, 22);
 
@@ -798,38 +878,49 @@ namespace HeadlessFFXI
                 //ref<uint32>(0x44) = PChar->jobs.unlocked & 1;    // первый бит в unlocked отвечает за дополнительную профессию
             }
         }
+        // GP_SERV_COMMAND_ITEM_MAX
         void P01C(byte[] packet, int size, int index)
         {
             Player_Data.Inv = new Inventory();
-            Player_Data.Inv.Container = new Storage[13];
+            Player_Data.Inv.Container = new Storage[18];
             Player_Data.Inv.Container[0].size = packet[0x04 + index];
-            Player_Data.Inv.Container[0].current_size = BitConverter.ToUInt16(packet, 0x14 + index);
+            Player_Data.Inv.Container[0].available = BitConverter.ToUInt16(packet, 0x24 + index);
             Player_Data.Inv.Container[1].size = packet[0x05 + index];
-            Player_Data.Inv.Container[1].current_size = BitConverter.ToUInt16(packet, 0x16 + index);
+            Player_Data.Inv.Container[1].available = BitConverter.ToUInt16(packet, 0x26 + index);
             Player_Data.Inv.Container[2].size = packet[0x06 + index];
-            Player_Data.Inv.Container[2].current_size = BitConverter.ToUInt16(packet, 0x18 + index);
+            Player_Data.Inv.Container[2].available = BitConverter.ToUInt16(packet, 0x28 + index);
             Player_Data.Inv.Container[3].size = packet[0x07 + index];
-            Player_Data.Inv.Container[3].current_size = BitConverter.ToUInt16(packet, 0x1A + index);
+            Player_Data.Inv.Container[3].available = BitConverter.ToUInt16(packet, 0x2A + index);
             Player_Data.Inv.Container[4].size = packet[0x08 + index];
-            Player_Data.Inv.Container[4].current_size = BitConverter.ToUInt16(packet, 0x1C + index);
+            Player_Data.Inv.Container[4].available = BitConverter.ToUInt16(packet, 0x2C + index);
             Player_Data.Inv.Container[5].size = packet[0x09 + index];
-            Player_Data.Inv.Container[5].current_size = BitConverter.ToUInt16(packet, 0x1E + index);
+            Player_Data.Inv.Container[5].available = BitConverter.ToUInt16(packet, 0x2E + index);
             Player_Data.Inv.Container[6].size = packet[0x0A + index];
-            Player_Data.Inv.Container[6].current_size = BitConverter.ToUInt16(packet, 0x20 + index);
+            Player_Data.Inv.Container[6].available = BitConverter.ToUInt16(packet, 0x30 + index);
             Player_Data.Inv.Container[7].size = packet[0x0B + index];
-            Player_Data.Inv.Container[7].current_size = BitConverter.ToUInt16(packet, 0x22 + index);
+            Player_Data.Inv.Container[7].available = BitConverter.ToUInt16(packet, 0x32 + index);
             Player_Data.Inv.Container[8].size = packet[0x0C + index];
-            Player_Data.Inv.Container[8].current_size = BitConverter.ToUInt16(packet, 0x24 + index);
+            Player_Data.Inv.Container[8].available = BitConverter.ToUInt16(packet, 0x34 + index);
             Player_Data.Inv.Container[9].size = packet[0x0D + index];
-            Player_Data.Inv.Container[9].current_size = BitConverter.ToUInt16(packet, 0x26 + index);
+            Player_Data.Inv.Container[9].available = BitConverter.ToUInt16(packet, 0x36 + index);
             Player_Data.Inv.Container[10].size = packet[0x0E + index];
-            Player_Data.Inv.Container[10].current_size = BitConverter.ToUInt16(packet, 0x28 + index);
+            Player_Data.Inv.Container[10].available = BitConverter.ToUInt16(packet, 0x38 + index);
             Player_Data.Inv.Container[11].size = packet[0x0F + index];
-            Player_Data.Inv.Container[11].current_size = BitConverter.ToUInt16(packet, 0x2A + index);
+            Player_Data.Inv.Container[11].available = BitConverter.ToUInt16(packet, 0x3A + index);
             Player_Data.Inv.Container[12].size = packet[0x10 + index];
-            Player_Data.Inv.Container[12].current_size = BitConverter.ToUInt16(packet, 0x2C + index);
-
+            Player_Data.Inv.Container[12].available = BitConverter.ToUInt16(packet, 0x3C + index);
+            Player_Data.Inv.Container[13].size = packet[0x11 + index];
+            Player_Data.Inv.Container[13].available = BitConverter.ToUInt16(packet, 0x3E + index);
+            Player_Data.Inv.Container[14].size = packet[0x12 + index];
+            Player_Data.Inv.Container[14].available = BitConverter.ToUInt16(packet, 0x40 + index);
+            Player_Data.Inv.Container[15].size = packet[0x13 + index];
+            Player_Data.Inv.Container[15].available = BitConverter.ToUInt16(packet, 0x42 + index);
+            Player_Data.Inv.Container[16].size = packet[0x14 + index];
+            Player_Data.Inv.Container[16].available = BitConverter.ToUInt16(packet, 0x44 + index);
+            Player_Data.Inv.Container[17].size = packet[0x15 + index];
+            Player_Data.Inv.Container[17].available = BitConverter.ToUInt16(packet, 0x46 + index);
         }
+        //
         void P050(byte[] packet, int size, int index)
         {
             if (size == 0x04)
@@ -844,13 +935,18 @@ namespace HeadlessFFXI
                     Console.WriteLine("[Parse]Incorect size in incoming 0x50 Packet");
             }
         }
+
+        //GP_SERV_COMMAND_SERVERSTATUS
         void P037(byte[] packet, int size, int index)
         {
 
         }
+
+        //CCharHealthPacket
         void P0DF(byte[] packet, int size, int index)
         {
-            if (size == 0x12)
+            //Char 0x28  Trust 0x24
+            if (size == 0x14)
             {
                 uint id = BitConverter.ToUInt32(packet, 0x04 + index);
                 if (id == Player_Data.ID)
@@ -866,6 +962,9 @@ namespace HeadlessFFXI
                     // packet[0x21] //Job level
                     // packet[0x22] //Sub Job
                     // packet[0x23] //Sub Job level
+                    // Excluded from trust packet
+                    // packet[0x24] // Master Level
+                    // packet[0x25] // Master Breaker
                 }
                 else
                 {
@@ -882,7 +981,8 @@ namespace HeadlessFFXI
         //Zone in
         void P00A(byte[] packet, int size, int index)
         {
-            if (size == 0x82)
+            var ExpectedSize = 0x82;
+            if (size == ExpectedSize)
             {
                 Player_Data.ID = BitConverter.ToUInt32(packet, 0x04 + index);
                 Player_Data.targid = BitConverter.ToUInt16(packet, 0x08 + index);
@@ -890,6 +990,7 @@ namespace HeadlessFFXI
                 Player_Data.pos.X = BitConverter.ToSingle(packet, 0x0C + index);
                 Player_Data.pos.Y = BitConverter.ToSingle(packet, 0x10 + index);
                 Player_Data.pos.Z = BitConverter.ToSingle(packet, 0x14 + index);
+                Player_Data.pos.moving = 0;
                 Player_Data.Job = packet[0xB4 + index];
                 Player_Data.SubJob = packet[0xB7 + index];
                 Player_Data.MaxHP = BitConverter.ToUInt32(packet, 0xE8 + index);
@@ -914,12 +1015,444 @@ namespace HeadlessFFXI
             else
             {
                 if (!silient)
-                    Console.WriteLine("[Parse]Incorect size in incoming 0xDF Packet");
+                    Console.WriteLine("[Parse]Incorect size in incoming 00A Packet Expected {0:X} Got {1:X}", ExpectedSize, size);
+            }
+
+            Task.Run(() => OutGoing_O11()); // Send Zone in confirmation
+
+        }
+
+        [Flags]
+        public enum SendFlags : byte
+        {
+            None = 0,
+            Position = 1 << 0,
+            ClaimStatus = 1 << 1,
+            General = 1 << 2,
+            Name = 1 << 3,
+            Model = 1 << 4,
+            Despawn = 1 << 5,
+            Name2 = 1 << 6
+
+        }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        public struct Flags0
+        {
+            private uint value;
+
+            public ushort MovTime
+            {
+                get => (ushort)(value & 0x1FFF); // bits 0–12
+                set => this.value = (this.value & ~0x1FFFu) | ((uint)value & 0x1FFFu);
+            }
+
+            public bool RunMode
+            {
+                get => (value & (1u << 13)) != 0;
+                set => this.value = value ? (this.value | (1u << 13)) : (this.value & ~(1u << 13));
+            }
+
+            public bool Unknown_1_6
+            {
+                get => (value & (1u << 14)) != 0;
+                set => this.value = value ? (this.value | (1u << 14)) : (this.value & ~(1u << 14));
+            }
+
+            public bool GroundFlag
+            {
+                get => (value & (1u << 15)) != 0;
+                set => this.value = value ? (this.value | (1u << 15)) : (this.value & ~(1u << 15));
+            }
+
+            public bool KingFlag
+            {
+                get => (value & (1u << 16)) != 0;
+                set => this.value = value ? (this.value | (1u << 16)) : (this.value & ~(1u << 16));
+            }
+
+            public ushort FaceTarget
+            {
+                get => (ushort)((value >> 17) & 0x7FFF); // bits 17–31
+                set => this.value = (this.value & ~(0x7FFFu << 17)) | (((uint)value & 0x7FFFu) << 17);
+            }
+
+            public uint Raw
+            {
+                get => value;
+                set => this.value = value;
+            }
+        }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        public struct StatusFlags
+        {
+            public byte RawValue;
+
+            private const byte MonsterFlagMask  = 1 << 0;
+            private const byte HideFlagMask     = 1 << 1;
+            private const byte SleepFlagMask    = 1 << 2;
+            private const byte Unknown_0_3Mask  = 1 << 3;
+            private const byte Unknown_0_4Mask  = 1 << 4;
+            private const byte ChocoboIndexMask = 0b111 << 5; // bits 5–7
+
+            public bool MonsterFlag
+            {
+                readonly get => (RawValue & MonsterFlagMask) != 0;
+                set => RawValue = value ? (byte)(RawValue | MonsterFlagMask) : (byte)(RawValue & ~MonsterFlagMask);
+            }
+
+            public bool HideFlag
+            {
+                readonly get => (RawValue & HideFlagMask) != 0;
+                set => RawValue = value ? (byte)(RawValue | HideFlagMask) : (byte)(RawValue & ~HideFlagMask);
+            }
+
+            public bool SleepFlag
+            {
+                readonly get => (RawValue & SleepFlagMask) != 0;
+                set => RawValue = value ? (byte)(RawValue | SleepFlagMask) : (byte)(RawValue & ~SleepFlagMask);
+            }
+
+            public bool Unknown_0_3
+            {
+                readonly get => (RawValue & Unknown_0_3Mask) != 0;
+                set => RawValue = value ? (byte)(RawValue | Unknown_0_3Mask) : (byte)(RawValue & ~Unknown_0_3Mask);
+            }
+
+            public bool Unknown_0_4
+            {
+                readonly get => (RawValue & Unknown_0_4Mask) != 0;
+                set => RawValue = value ? (byte)(RawValue | Unknown_0_4Mask) : (byte)(RawValue & ~Unknown_0_4Mask);
+            }
+
+            public byte ChocoboIndex
+            {
+                readonly get => (byte)((RawValue & ChocoboIndexMask) >> 5);
+                set => RawValue = (byte)((RawValue & ~ChocoboIndexMask) | ((value & 0b111) << 5));
             }
         }
 
+        //Char Update
+        void P00D(byte[] packet, int size, int index)
+        {
+            var charID = BitConverter.ToUInt32(packet, index + 0x04);
+            var updateIndex = BitConverter.ToUInt16(packet, index + 0x08);
+
+            SendFlags updateFlags = (SendFlags)packet[index + 0x0A];
+            //Console.WriteLine("Char Update for ID:{0:G} Index:{1:G}", charID, updateIndex);
+            //Console.WriteLine(updateFlags);
+            if (updateFlags.HasFlag(SendFlags.Position))
+            {
+                Entity_List[updateIndex].IsValid = true;
+                EntityType entityType = EntityType.PC;
+                Entity_List[updateIndex].Type = (byte)entityType;
+                var rot = packet[index + 0x0B];
+                var x = BitConverter.ToSingle(packet, index + 0x0C);
+                var y = BitConverter.ToSingle(packet, index + 0x10);
+                var z = BitConverter.ToSingle(packet, index + 0x14);
+                Entity_List[updateIndex].Pos.Rot = rot;
+                Entity_List[updateIndex].Pos.X = x;
+                Entity_List[updateIndex].Pos.Y = y;
+                Entity_List[updateIndex].Pos.Z = z;
+                Flags0 flags0 = new Flags0 { Raw = BitConverter.ToUInt32(packet, index + 0x18) };
+                var targetindex = flags0.FaceTarget; // Index to entitys target
+                Entity_List[updateIndex].TargetIndex = targetindex;
+
+                //var speed = packet[index + 0x1C];
+                //var speedbase = packet[index + 0x1D];
+
+                Player_Data.pos.Rot = rot;
+                Player_Data.pos.X = x;
+                Player_Data.pos.Y = y;
+                Player_Data.pos.Z = z;
+                //Player_Data.pos.moving = flags0.MovTime;
+
+            }
+
+            if (updateFlags.HasFlag(SendFlags.General))
+            {
+                Entity_List[updateIndex].IsValid = true;
+                var Hpp = packet[index + 0x1E];
+                var server_status = packet[index + 0x1F];
+                Entity_List[updateIndex].Hpp = Hpp;
+                Entity_List[updateIndex].Status = server_status;
+            }
+
+            if (updateFlags.HasFlag(SendFlags.Model))
+            {
+                // Look data who cares
+            }
+
+            if (updateFlags.HasFlag(SendFlags.Name))
+            {
+                Entity_List[updateIndex].IsValid = true;
+                var name = System.Text.Encoding.UTF8.GetString(packet, index + 0x5A, 15).TrimEnd('\0');
+                Entity_List[updateIndex].Name = name;
+            }
+
+            if (updateFlags.HasFlag(SendFlags.Name) || updateFlags.HasFlag(SendFlags.General))
+            {
+                //var Flag6 = new Flags6 { Raw = BitConverter.ToUInt32(packet, index + 0x44) };
+                //Flag6.MountIndex
+            }
+
+            if (updateFlags.HasFlag(SendFlags.Despawn))
+            {
+                Entity_List[updateIndex] = new Entity();
+            }
+            else
+            {
+                var CostumeId = BitConverter.ToUInt16(packet, index + 0x30);
+                var PetActIndex = BitConverter.ToUInt16(packet, index + 0x3C);
+            }
+        }
+        //Entity Update
+        void P00E(byte[] packet, int size, int index)
+        {
+            var entityID = BitConverter.ToUInt32(packet, index + 0x04);
+            var updateIndex = BitConverter.ToUInt16(packet, index + 0x08);
+
+            SendFlags updateFlags = (SendFlags)packet[index + 0x0A];
+
+            if (updateFlags.HasFlag(SendFlags.Despawn))
+            {
+                Console.WriteLine("Entity Despawn for ID:{0:G} Index:{1:G} Name:{2:G}", entityID, updateIndex, Entity_List[updateIndex].Name);
+                Entity_List[updateIndex] = new Entity();
+            }
+            else
+            {
+                Entity_List[updateIndex].Status = packet[index + 0x20];
+                StatusFlags flags = new StatusFlags { RawValue = Entity_List[updateIndex].Status };
+                EntityType entityType = flags.MonsterFlag ? EntityType.Mob : EntityType.NPC;
+                Entity_List[updateIndex].Type = (byte)entityType;
+
+                if (updateFlags.HasFlag(SendFlags.Position))
+                {
+                    Entity_List[updateIndex].IsValid = true;
+                    var rot = packet[index + 0x0B];
+                    var x = BitConverter.ToSingle(packet, index + 0x0C);
+                    var y = BitConverter.ToSingle(packet, index + 0x10);
+                    var z = BitConverter.ToSingle(packet, index + 0x14);
+                    Entity_List[updateIndex].Pos.Rot = rot;
+                    Entity_List[updateIndex].Pos.X = x;
+                    Entity_List[updateIndex].Pos.Y = y;
+                    Entity_List[updateIndex].Pos.Z = z;
+                    Flags0 flags0 = new Flags0 { Raw = BitConverter.ToUInt32(packet, index + 0x18) };
+                    var targetindex = flags0.FaceTarget; // Index to entitys target
+                    Entity_List[updateIndex].TargetIndex = targetindex;
+
+                    //var speed = packet[index + 0x1C];
+                    //var speedbase = packet[index + 0x1D];
+
+                }
+
+                if (updateFlags.HasFlag(SendFlags.General))
+                {
+                    Entity_List[updateIndex].IsValid = true;
+                    var Hpp = packet[index + 0x1E];
+                    var server_status = packet[index + 0x1F];
+                    Entity_List[updateIndex].Hpp = Hpp;
+                    Entity_List[updateIndex].Animation = server_status;
+                }
+
+                if (updateFlags.HasFlag(SendFlags.Name))
+                {
+                    Entity_List[updateIndex].IsValid = true;
+                    var name = System.Text.Encoding.UTF8.GetString(packet, index + 0x34, 15).TrimEnd('\0');
+                    Entity_List[updateIndex].Name = name;
+                }
+            }
+
+        }
+        #endregion
+
+        #region Outgoing Packets
+        // Char Pos
+        void OutGoing_015()
+        {
+            ClientPacketID++;
+            byte[] data = new byte[74];
+            byte[] input = BitConverter.GetBytes(ClientPacketID); //Client Packet Id
+            System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
+            input = BitConverter.GetBytes(ServerPacketID); //Server Packet Id
+            System.Buffer.BlockCopy(input, 0, data, 2, input.Length);
+
+            packet_SetType(ref data, 0x15);
+            packet_SetSize(ref data, 0x10);
+
+            input = BitConverter.GetBytes(ClientPacketID); //Packet count
+            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
+
+            input = BitConverter.GetBytes(Player_Data.pos.X);
+            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x04, input.Length); //Xpos
+            input = BitConverter.GetBytes(Player_Data.pos.Y);
+            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x08, input.Length); //Ypos
+            input = BitConverter.GetBytes(Player_Data.pos.Z);
+            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x0C, input.Length); //Zpos
+
+            if (Player_Data.pos.HasChanged(Player_Data.oldpos))
+            {
+                Player_Data.pos.moving = (ushort)(Player_Data.pos.moving + 7);
+                Player_Data.oldpos = Player_Data.pos;
+            }
+            else
+            {
+                Player_Data.pos.moving = 0;
+            }
+
+            input = BitConverter.GetBytes(Player_Data.pos.moving);
+            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x12, input.Length);//MoveFlame
+
+            input = new byte[] { Player_Data.pos.Rot };
+            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x14, input.Length);//dir
+
+            packet_Compress(ref data);
+            packet_addmd5(ref data);
+            packet_Encode(ref data);
+            Gameserver.Send(data, data.Length);
+
+        }
+        // Zone in confirmation
+        void OutGoing_O11()
+        {
+            Thread.Sleep(500);
+
+            ClientPacketID++;
+            byte[] data = new byte[Packet_Head + 8];
+            byte[] input = BitConverter.GetBytes(ClientPacketID); //Client Packet Id
+            System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
+            input = BitConverter.GetBytes(ServerPacketID); //Server Packet Id
+            System.Buffer.BlockCopy(input, 0, data, 2, input.Length);
+
+            packet_SetType(ref data, 0x11);
+            packet_SetSize(ref data, 0x04);
+
+            input = BitConverter.GetBytes(ClientPacketID); //Packet count
+            System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
+
+            data[Packet_Head + 4] = 2;
+
+            packet_Compress(ref data);
+
+            packet_addmd5(ref data);
+            if (!silient)
+                Console.WriteLine("[Game]Outgoing packet 0x11, Zone in confirmation");
+
+            packet_Encode(ref data);
+
+            Gameserver.Send(data, data.Length);
+
+            Thread.Sleep(2000);
+
+            Task.Run(async () =>
+            {
+                while (!abort)
+                {
+                    OutGoing_015();                    // your send logic
+                    await Task.Delay(400);             // non-blocking 400 ms wait
+                }
+            });
+
+            OutGoing_ZoneInData();
+        }
+
+        void OutGoing_ZoneInData()
+        {
+            Console.WriteLine("[Game]Sending Zone in data serverpacket:{0:G}", ServerPacketID);
+            if (chardata)
+            {
+                ClientPacketID++;
+                byte[] data = new byte[183];
+
+                byte[] input = BitConverter.GetBytes(ClientPacketID); //Client Packet Id
+                System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
+                input = BitConverter.GetBytes(ServerPacketID); //Server Packet Id
+                System.Buffer.BlockCopy(input, 0, data, 2, input.Length);
+
+                input = BitConverter.GetBytes(((UInt16)0x0C)); //Packet type
+                System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
+                input = new byte[] { 0x06 }; //Size
+                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
+                input = BitConverter.GetBytes(ClientPacketID); //Packet count
+                System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
+
+                int new_Head = Packet_Head + (0x06 * 2);
+
+                input = BitConverter.GetBytes(((UInt16)0x61)); //Packet type
+                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
+                input = new byte[] { 0x04 }; //Size
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
+                input = BitConverter.GetBytes(ClientPacketID); //Packet count
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
+
+                new_Head = new_Head + (0x04 * 2);
+
+                input = BitConverter.GetBytes(((UInt16)0x01A)); //Packet type
+                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
+                input = new byte[] { 0x0E }; //Size
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
+                input = BitConverter.GetBytes(ClientPacketID); //Packet count
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
+                input = new byte[] { 0x14 }; //Action type
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x0A, input.Length);
+
+                new_Head = new_Head + (0x0E * 2);
+
+                input = BitConverter.GetBytes(((UInt16)0x4B)); //Packet type
+                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
+                input = new byte[] { 0x0C }; //Size
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
+                input = BitConverter.GetBytes(ClientPacketID); //Packet count
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
+                input = new byte[] { 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; //Language,Timestamp,Lengh,Start offset
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x07, input.Length);
+
+                new_Head = new_Head + (0x0C * 2);
+
+                input = BitConverter.GetBytes(((UInt16)0x0F)); //Packet type
+                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
+                input = new byte[] { 0x12 }; //Size
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
+                input = BitConverter.GetBytes(ClientPacketID); //Packet count
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
+
+                new_Head = new_Head + (0x12 * 2);
+
+                //input = BitConverter.GetBytes(((UInt16)0x0DB)); //Packet type
+                //System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
+                //input = new byte[] { 0x14 }; //Size
+                //System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
+                //input = BitConverter.GetBytes(PDcode); //Packet count
+                //System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
+                //input = new byte[] { 0x02 }; //Language
+                //System.Buffer.BlockCopy(input, 0, data, new_Head + 0x24, input.Length);
+                //new_Head = new_Head + (0x14 * 2);
+
+                input = BitConverter.GetBytes(((UInt16)0x5A)); //Packet type
+                System.Buffer.BlockCopy(input, 0, data, new_Head, input.Length);
+                input = new byte[] { 0x02 }; //Size
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x01, input.Length);
+                input = BitConverter.GetBytes(ClientPacketID); //Packet count
+                System.Buffer.BlockCopy(input, 0, data, new_Head + 0x02, input.Length);
+
+                //new_Head = new_Head + (0x02 * 2);
+
+                packet_Compress(ref data);
+
+                packet_addmd5(ref data);
+
+                packet_Encode(ref data);
+
+                if (!silient)
+                    Console.WriteLine("[Game]Outgoing packet multi,Sending Post zone data requests");
+
+                Gameserver.Send(data, data.Length);
+
+            }
+        }
         #endregion
     }
+
+
 
     class Blowfish
     {
@@ -1368,6 +1901,7 @@ namespace HeadlessFFXI
         public byte zoneid;
         public Zone_Info zone;
         public Position pos;
+        public Position oldpos;
         public uint HP;
         public uint MP;
         public uint TP;
@@ -1399,6 +1933,14 @@ namespace HeadlessFFXI
         public float Y;
         public float Z;
         public byte Rot;
+
+        public UInt16 moving;
+
+        public readonly bool HasChanged(Position other)
+        {
+            return X != other.X || Y != other.Y || Z != other.Z || Rot != other.Rot;
+        }
+        public override string ToString() => $"({X}, {Y}, {Z}, Rot={Rot})";
     }
     struct AccountInfo
     {
@@ -1406,6 +1948,7 @@ namespace HeadlessFFXI
         public int Char_Slot;
         public string Username;
         public string Password;
+        public byte[] SessionHash;
     }
     struct Inventory
     {
@@ -1414,7 +1957,7 @@ namespace HeadlessFFXI
     struct Storage
     {
         public byte size;
-        public UInt16 current_size;
+        public UInt16 available;
         public InventorySlot[] slots;
     }
     struct InventorySlot
@@ -1430,5 +1973,50 @@ namespace HeadlessFFXI
         public string server;
         public int char_slot;
     }
+    struct Entity
+    {
+        public bool IsValid;
+        public byte Type;
+        public uint ID;
+        public UInt16 TargetIndex;
+        public string Name;
+        public byte Hpp;
+        public byte Animation;
+        public byte Status;
+        public Position Pos;
+    }
+    [Flags]
+    public enum EntityType : byte
+    {
+        None   = 0x00,
+        PC     = 0x01,
+        NPC    = 0x02,
+        Mob    = 0x04,
+        Pet    = 0x08,
+        Ship   = 0x10,
+        Trust  = 0x20,
+        Fellow = 0x40
+    }
     #endregion
+    //0-1023 Mobs/NPCS/Ships
+    //1024-1791 Players
+    //1792-4095 Dynamic Pets/Trust/DE Npc/DE Mobs
+
+}
+
+public class TimestampTextWriter : TextWriter
+{
+    private readonly TextWriter _originalOut;
+    public override Encoding Encoding => _originalOut.Encoding;
+
+    public TimestampTextWriter(TextWriter originalOut)
+    {
+        _originalOut = originalOut;
+    }
+
+    public override void WriteLine(string value)
+    {
+        string timestamp = $"[{DateTime.Now:HH:mm:ss.fff}] ";
+        _originalOut.WriteLine(timestamp + value);
+    }
 }
