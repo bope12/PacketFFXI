@@ -4,19 +4,12 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Net;
-using System.IO.Compression;
-using System.Diagnostics;
-using System.Collections.Generic;
 using System.Text;
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Linq;
-using System.Security.AccessControl;
-
 
 namespace HeadlessFFXI
 {
@@ -26,11 +19,11 @@ namespace HeadlessFFXI
         const int Packet_Head = 28;
         uint[] startingkey = { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xAD5DE056 }; // ;
         public bool chardata;
-        bool silient;
+        public bool silient;
         Blowfish tpzblowfish;
         AccountInfo Account_Data;
-        My_Player Player_Data;
-        Entity[] Entity_List = new Entity[4096];
+        public My_Player Player_Data;
+        public Entity[] Entity_List = new Entity[4096];
         zlib myzlib;
         string loginserver = "127.0.0.1";
         TcpClient lobbyview;
@@ -48,6 +41,7 @@ namespace HeadlessFFXI
         Thread Logic;
         bool abort = false;
         public bool Connected = false;
+        private readonly PacketHandlerRegistry _registry = new();
         #endregion
         #region Loginproccess
         public Client(Config cfg, bool Full = true, bool log = false)
@@ -67,7 +61,7 @@ namespace HeadlessFFXI
             //Console.WriteLine("[Info]Attempting to login");
             try
             {
-                AppContext.SetSwitch("System.Net.Security.UseNetworkFramework", true);
+                //AppContext.SetSwitch("System.Net.Security.UseNetworkFramework", true);
                 TcpClient client = new TcpClient(loginserver, 54231);
 
                 using var sslStream = new SslStream(
@@ -631,108 +625,25 @@ namespace HeadlessFFXI
                     int index = 0;
                     int size = final.Length > 2 ? final[index + 1] & 0x0FE : 0;
 
-                    while (index < final.Length && final.Length - index > 2 && size > 0)
+                    while (index + 2 <= final.Length)
                     {
-                        int type = BitConverter.ToUInt16(final, index) & 0x1FF;
+                        // Make sure we can at least read the type and size
+                        ushort type = (ushort)(BitConverter.ToUInt16(final, index) & 0x1FF);
                         size = final[index + 1] & 0x0FE;
-                        //Console.WriteLine("Received packet:{0:X}: Size:{1:X}", type, size);
-                        switch (type)
-                        {
-                            case 0x28://Action
-                            case 0x41://Blacklist//Stopdownloading data
-                            case 0x44://Job Extra
-                            case 0x55://KeyItems
-                            case 0x5E://Conquest
-                            case 0x71://Campaign
-                            case 0xAA://SpellList
-                            case 0xAC://CharAbilites
-                            case 0xAE://CharMounts
-                            case 0xCA://BazaarMessage
-                                if(receiveBytes.Length > 49)
-                                    Console.WriteLine("[Game]Incoming Unhandled Packet {0:X} Serverid:" + server_packet_id + " Clientid:" + client_packet_id + " sent at:" + packet_time + " Size:" + size, type );
-                                break;
-                            case 0x08: // GP_SERV_COMMAND_ENTERZONE
-                                P008(final, size, index);
-                                break;
-                            case 0x0A:
-                                P00A(final, size, index);//Zone In
-                                break;
-                            case 0x0D://Char Update
-                                P00D(final, size, index);
-                                break;
-                            case 0x0E://EntityUpdate
-                                P00E(final, size, index);
-                                break;
-                            case 0x17:
-                                P017(final, size, index);//Chat Messagae
-                                break;
-                            case 0x1B:
-                                P01B(final, size, index);
-                                break;
-                            case 0x1C://Inventory Size
-                                P01C(final, size, index);
-                                break;
-                            case 0x1D://GP_SERV_COMMAND_ITEM_SAME
-                                P01D(final, size, index);
-                                break;
-                            case 0x1F: // GP_SERV_COMMAND_ITEM_LIST
-                                P01F(final, size, index);
-                                break;
-                            case 0x20://GP_SERV_COMMAND_ITEM_ATTR
-                                P020(final, size, index);
-                                break;
-                            case 0x37://Char Update
-                                P037(final, size, index);
-                                break;
-                            case 0x4D://ServerMessage
-                                P04D(final, size, index);
-                                break;
-                            case 0x4F: // GP_SERV_COMMAND_EQUIP_CLEAR
-                                P04F(final, size, index);
-                                break;
-                            case 0x50://Equipment
-                                P050(final, size, index);
-                                break;
-                            case 0x51: // GP_SERV_COMMAND_GRAP_LIST
-                                P051(final, size, index);
-                                break;
-                            case 0x56: // GP_SERV_COMMAND_MISSION
-                                P056(final, size, index);
-                                break;
-                            case 0x61: // GP_SERV_COMMAND_CLISTATUS
-                                P061(final, size, index);
-                                break;
-                            case 0x62: // GP_SERV_COMMAND_CLISTATUS2
-                                P062(final, size, index);
-                                break;
-                            case 0x63: // GP_SERV_COMMAND_MISCDATA
-                                P063(final, size, index);
-                                break;
-                            case 0x67: // GP_SERV_COMMAND_ENTITY_UPDATE1
-                                P067(final, size, index);
-                                break;
-                            case 0x8C: // GP_SERV_COMMAND_MERIT
-                                P08C(final, size, index);
-                                break;
-                            case 0xB4: // GP_SERV_COMMAND_CONFIG
-                                P0B4(final, size, index);
-                                break;
-                            case 0xD2: // GP_SERV_COMMAND_TROPHY_LIST
-                                P0D2(final, size, index);
-                                break;
-                            case 0xDF:
-                                P0DF(final, size, index);//Char/trust Health
-                                break;
-                            case 0x119: // GP_SERV_COMMAND_ABIL_RECAST
-                                P119(final, size, index);
-                                break;
-                            default:
-                                if(receiveBytes.Length > 49)
-                                    Console.WriteLine("[Game]Incoming Unhandled Packet {0:X} Serverid:" + server_packet_id + " Clientid:" + client_packet_id + " sent at:" + packet_time + " Size:" + size, type );
-                                break;
 
+                        int packetLength = size * 2;
+
+                        // Safety check
+                        if (packetLength <= 0 || index + packetLength > final.Length)
+                        {
+                            //Console.WriteLine($"[WARN] Invalid packet {type} length at index {index}. Size={packetLength}, Remaining={final.Length - index}");
+                            break; // prevent crash
                         }
-                        index += size * 2;
+
+                        ReadOnlySpan<byte> packetData = new ReadOnlySpan<byte>(final, index, packetLength);
+                        _registry.TryHandle(this, type, packetData);
+
+                        index += packetLength;
                     }
                 }
                 catch (SocketException d)
@@ -850,368 +761,7 @@ namespace HeadlessFFXI
         {
             System.Environment.Exit(1);
         }
-        #region Incoming Packets
-        //GP_SERV_COMMAND_ENTERZONE
-        void P008(byte[] packet, int size, int index)
-        {
-            //uint8_t EnterZoneTbl[48]; // PS2: EnterZoneTbl
-        }
 
-        // Chat Message
-        void P017(byte[] packet, int size, int index)
-        {
-
-            var MessageType = packet[index + 0x04];
-            var isGM = packet[index + 0x05] == 0x01;
-            var zoneID = BitConverter.ToUInt16(packet, index + 0x06); // 0x06 can also be MentorRank or MasterRank depending on MessageType
-            string name = System.Text.Encoding.UTF8.GetString(packet, index + 0x08, 15).TrimEnd('\0');
-            if (!silient)
-                Console.WriteLine("[Chat]" + name + ":" + System.Text.Encoding.UTF8.GetString(packet, index + 0x17, 107).TrimEnd('\0'));
-            // //Respond to chat
-            // byte[] data = new byte[0x64];
-            // byte[] input = BitConverter.GetBytes(ClientPacketID); //Client Packet Id
-            // System.Buffer.BlockCopy(input, 0, data, 0, input.Length);
-            // input = BitConverter.GetBytes(ServerPacketID); //Server Packet Id
-            // System.Buffer.BlockCopy(input, 0, data, 2, input.Length);
-            //
-            // input = BitConverter.GetBytes(((UInt16)0xB5)); //Packet type
-            // System.Buffer.BlockCopy(input, 0, data, Packet_Head, input.Length);
-            //
-            // input = BitConverter.GetBytes(ClientPacketID); //Packet count
-            // System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x02, input.Length);
-            // data[Packet_Head + 0x04] = 0; //say
-            // name = name.Insert(name.Length, " I hear you there buddy");
-            // Console.WriteLine(name);
-            // input = Encoding.ASCII.GetBytes(name);
-            // Console.WriteLine(input.Length);
-            // System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x06, input.Length);
-            // input = BitConverter.GetBytes(10); //Size
-            // System.Buffer.BlockCopy(input, 0, data, Packet_Head + 0x01, input.Length);
-            // packet_addmd5(ref data);
-            // Console.WriteLine(data.Length);
-            // Gameserver.Send(data, data.Length);
-            IncomingChat?.Invoke(this, EventArgs.Empty);
-        }
-        // Server Message
-        void P04D(byte[] packet, int size, int index)
-        {
-            uint length = BitConverter.ToUInt32(packet, 0x14 + index);
-            if (!silient)
-                Console.WriteLine("[SMES]" + System.Text.Encoding.UTF8.GetString(packet, 0x18 + index, (int)length));
-        }
-        // CCharJobsPacket
-        void P01B(byte[] packet, int size, int index)
-        {
-            if (size == 0x84)
-            {
-                //memcpy(data + (0x0C), &PChar->jobs, 22);
-
-                //memcpy(data + (0x20), &PChar->stats, 14);
-                //memcpy(data + (0x44), &PChar->jobs, 27);
-
-                //ref<uint32>(0x3C) = PChar->health.hp;
-                //ref<uint32>(0x40) = PChar->health.mp;
-
-                //ref<uint32>(0x44) = PChar->jobs.unlocked & 1;    // первый бит в unlocked отвечает за дополнительную профессию
-            }
-        }
-        // GP_SERV_COMMAND_ITEM_MAX
-        void P01C(byte[] packet, int size, int index)
-        {
-            Player_Data.Inv = new Inventory();
-            Player_Data.Inv.Container = new Storage[18];
-            for (int i = 0; i < 18; i++)
-            {
-                Player_Data.Inv.Container[i].size = packet[0x04 + i + index];
-                Player_Data.Inv.Container[i].available = BitConverter.ToUInt16(packet, 0x24 + ( i * 2) + index);
-                Player_Data.Inv.Container[i].slots = new InventorySlot[Player_Data.Inv.Container[i].size];
-            }
-            // Player_Data.Inv.Container[0].size = packet[0x04 + index];
-            // Player_Data.Inv.Container[0].available = BitConverter.ToUInt16(packet, 0x24 + index);
-            // Player_Data.Inv.Container[0].slots = new InventorySlot[Player_Data.Inv.Container[0].size];
-            // Player_Data.Inv.Container[1].size = packet[0x05 + index];
-            // Player_Data.Inv.Container[1].available = BitConverter.ToUInt16(packet, 0x26 + index);
-            // Player_Data.Inv.Container[2].size = packet[0x06 + index];
-            // Player_Data.Inv.Container[2].available = BitConverter.ToUInt16(packet, 0x28 + index);
-            // Player_Data.Inv.Container[3].size = packet[0x07 + index];
-            // Player_Data.Inv.Container[3].available = BitConverter.ToUInt16(packet, 0x2A + index);
-            // Player_Data.Inv.Container[4].size = packet[0x08 + index];
-            // Player_Data.Inv.Container[4].available = BitConverter.ToUInt16(packet, 0x2C + index);
-            // Player_Data.Inv.Container[5].size = packet[0x09 + index];
-            // Player_Data.Inv.Container[5].available = BitConverter.ToUInt16(packet, 0x2E + index);
-            // Player_Data.Inv.Container[6].size = packet[0x0A + index];
-            // Player_Data.Inv.Container[6].available = BitConverter.ToUInt16(packet, 0x30 + index);
-            // Player_Data.Inv.Container[7].size = packet[0x0B + index];
-            // Player_Data.Inv.Container[7].available = BitConverter.ToUInt16(packet, 0x32 + index);
-            // Player_Data.Inv.Container[8].size = packet[0x0C + index];
-            // Player_Data.Inv.Container[8].available = BitConverter.ToUInt16(packet, 0x34 + index);
-            // Player_Data.Inv.Container[9].size = packet[0x0D + index];
-            // Player_Data.Inv.Container[9].available = BitConverter.ToUInt16(packet, 0x36 + index);
-            // Player_Data.Inv.Container[10].size = packet[0x0E + index];
-            // Player_Data.Inv.Container[10].available = BitConverter.ToUInt16(packet, 0x38 + index);
-            // Player_Data.Inv.Container[11].size = packet[0x0F + index];
-            // Player_Data.Inv.Container[11].available = BitConverter.ToUInt16(packet, 0x3A + index);
-            // Player_Data.Inv.Container[12].size = packet[0x10 + index];
-            // Player_Data.Inv.Container[12].available = BitConverter.ToUInt16(packet, 0x3C + index);
-            // Player_Data.Inv.Container[13].size = packet[0x11 + index];
-            // Player_Data.Inv.Container[13].available = BitConverter.ToUInt16(packet, 0x3E + index);
-            // Player_Data.Inv.Container[14].size = packet[0x12 + index];
-            // Player_Data.Inv.Container[14].available = BitConverter.ToUInt16(packet, 0x40 + index);
-            // Player_Data.Inv.Container[15].size = packet[0x13 + index];
-            // Player_Data.Inv.Container[15].available = BitConverter.ToUInt16(packet, 0x42 + index);
-            // Player_Data.Inv.Container[16].size = packet[0x14 + index];
-            // Player_Data.Inv.Container[16].available = BitConverter.ToUInt16(packet, 0x44 + index);
-            // Player_Data.Inv.Container[17].size = packet[0x15 + index];
-            // Player_Data.Inv.Container[17].available = BitConverter.ToUInt16(packet, 0x46 + index);
-        }
-        // GP_SERV_COMMAND_ITEM_SAME
-        // This packet is sent by the server to inform the client of inventory container updates and if all containers have been loaded/updated.
-        void P01D(byte[] packet, int size, int index)
-        {
-            byte doneLoading = packet[0x04 + index]; // 0 loading , 1 doneloading
-            byte containerId = packet[0x06 + index]; // if done will be maxcontainerID
-            //UInt32 flags = 0x0C
-        }
-
-        //GP_SERV_COMMAND_ITEM_LIST
-        void P01F(byte[] packet, int size, int index)
-        {
-            //TODO check if this should be resetting item or if 0x20 does
-            UInt32 quantity = BitConverter.ToUInt32(packet, 0x04 + index);
-            UInt16 itemId = BitConverter.ToUInt16(packet, 0x08 + index);
-            byte container = packet[0x0A + index];
-            byte itemIndex = packet[0x0B + index];
-            byte lockFlag = packet[0x0C + index];
-            Player_Data.Inv.Container[container].slots[itemIndex].itemid = itemId;
-            Player_Data.Inv.Container[container].slots[itemIndex].quantity = quantity;
-            Player_Data.Inv.Container[container].slots[itemIndex].lockFlag = lockFlag;
-        }
-        //GP_SERV_COMMAND_ITEM_ATTR
-        void P020(byte[] packet, int size, int index)
-        {
-            UInt32 quantity = BitConverter.ToUInt32(packet, 0x04 + index);
-            UInt32 price = BitConverter.ToUInt32(packet, 0x08 + index);
-            UInt16 itemId = BitConverter.ToUInt16(packet, 0x0C + index);
-            byte container = packet[0x0E + index];
-            byte itemIndex = packet[0x0F + index];
-            byte lockFlag = packet[0x10 + index];
-            Player_Data.Inv.Container[container].slots[itemIndex] = new InventorySlot();
-            Player_Data.Inv.Container[container].slots[itemIndex].itemid = itemId;
-            Player_Data.Inv.Container[container].slots[itemIndex].quantity = quantity;
-            Player_Data.Inv.Container[container].slots[itemIndex].lockFlag = lockFlag;
-            Player_Data.Inv.Container[container].slots[itemIndex].extra = new byte[24];
-            //exdata byte[24] 0x11
-        }
-
-        //GP_SERV_COMMAND_EQUIP_CLEAR
-        void P04F(byte[] packet, int size, int index)
-        {
-            // Maybe clears the whole inv? need to check when get internet or maybe just what is equiped
-            // Player_Data.Inv = new Inventory();
-        }
-
-        //
-        void P050(byte[] packet, int size, int index)
-        {
-            if (size == 0x04)
-            {
-                //ref<uint8>(0x04) = EquipSlot;
-                //ref<uint8>(0x05) = SlotID;
-                //ref<uint8>(0x06) = containerID;
-            }
-            else
-            {
-                if (!silient)
-                    Console.WriteLine("[Parse]Incorect size in incoming 0x50 Packet");
-            }
-        }
-
-        //GP_SERV_COMMAND_GRAP_LIST
-        void P051(byte[] packet, int size, int index)
-        {
-            // Tells client looks related info
-        }
-
-        //GP_SERV_COMMAND_MISSION
-        void P056(byte[] packet, int size, int index)
-        {
-            //quest and mission log data
-        }
-
-        //GP_SERV_COMMAND_CLISTATUS
-        void P061(byte[] packet, int size, int index)
-        {
-            // Stat menu infomation
-        }
-
-        //GP_SERV_COMMAND_CLISTATUS2
-        void P062(byte[] packet, int size, int index)
-        {
-            //skill base information.
-        }
-
-        //GP_SERV_COMMAND_MISCDATA
-        void P063(byte[] packet, int size, int index)
-        {
-            UInt16 miscType = BitConverter.ToUInt16(packet, 0x04 + index);
-            // Merits       = 0x02, // Merit menu info not merits themselves
-            // Monstrosity1 = 0x03, // Monstrosity Garbage
-            // Monstrosity2 = 0x04, // Monstrosity Garbage
-            // JobPoints    = 0x05, // Job point info for each Job
-            // Homepoints   = 0x06, // Teleport access Masks
-            // Unity        = 0x07, // Unity Garbage
-            // StatusIcons  = 0x09, // Gives StatusEffect icons and expiration timestamps
-            // Unknown      = 0x0A, // All zeros atm
-        }
-
-        //GP_SERV_COMMAND_ENTITY_UPDATE1
-        void P067(byte[] packet, int size, int index)
-        {
-            // two types of packet based on first byte?
-            byte type = packet[0x04 + index];
-            if (type == 0x02)
-            {
-                UInt16 targId = BitConverter.ToUInt16(packet, 0x06 + index);
-                UInt32 charId = BitConverter.ToUInt32(packet, 0x08 + index);
-                byte flag = packet[0x10 + index]; // 0x02 - Campaign Battle, 0x04 - Level Sync
-                byte levelRestriction = packet[0x26 + index];
-                byte level = packet[0x25 + index];
-                byte mh = packet[0x27 + index]; // MogExpansionFlag - Is 2nd floor unlocked.
-                // ref<uint16>(0x13)                           = PChar->StatusEffectContainer->GetStatusEffect(EFFECT_MOUNTED)->GetSubPower();
-                // ref<uint32>(0x18)                           = CustomProperties[0]; // Personal Chocobo model
-                // ref<uint32>(0x1C)                           = CustomProperties[1]; // Noble Chocobo
-            }
-            else
-            {
-                UInt16 targId = BitConverter.ToUInt16(packet, 0x06 + index);
-                UInt32 Id = BitConverter.ToUInt32(packet, 0x08 + index);
-                UInt16 trustMastertargId = BitConverter.ToUInt16(packet, 0x0C + index);
-                // 0x18 PacketName
-                string name = System.Text.Encoding.UTF8.GetString(packet, index + 0x18, 15).TrimEnd('\0');
-                Console.WriteLine("0x067 " + name);
-            }
-        }
-
-        //GP_SERV_COMMAND_MERIT
-        void P08C(byte[] packet, int size, int index)
-        {
-            // This is actual merit data of how much next will cost and how many you have for each merit
-        }
-
-        //GP_SERV_COMMAND_CONFIG
-        void P0B4(byte[] packet, int size, int index)
-        {
-            // Config Settings
-        }
-
-        //GP_SERV_COMMAND_TROPHY_LIST
-        void P0D2(byte[] packet, int size, int index)
-        {
-            UInt32 quantity = BitConverter.ToUInt32(packet, 0x04 + index);
-            UInt32 targetId = BitConverter.ToUInt32(packet, 0x08 + index);
-            // UInt16 gold = BitConverter.ToUInt16(packet, 0x0C + index);
-            // UInt16 pad00 = 0x0E;
-            UInt16 itemId = BitConverter.ToUInt16(packet, 0x10 + index);
-            UInt16 targetIndex = BitConverter.ToUInt16(packet, 0x12 + index);
-            byte poolSlot = packet[0x14 + index];
-            byte entry = packet[0x15 + index]; // 1 if old 0 if new
-            byte IsContainer = packet[0x16 + index]; // 1 if from NPC
-            // byte pad01 = packet[0x17 + index];
-            UInt32 startTime = BitConverter.ToUInt32(packet, 0x18 + index);
-
-        }
-
-        //GP_SERV_COMMAND_ABIL_RECAST
-        void P119(byte[] packet, int size, int index)
-        {
-            //Array of abilitys on cooldown and their recast info
-        }
-
-        //GP_SERV_COMMAND_SERVERSTATUS
-        void P037(byte[] packet, int size, int index)
-        {
-
-        }
-
-        //CCharHealthPacket
-        void P0DF(byte[] packet, int size, int index)
-        {
-            //Char 0x28  Trust 0x24
-            if (size == 0x14)
-            {
-                uint id = BitConverter.ToUInt32(packet, 0x04 + index);
-                if (id == Player_Data.ID)
-                {
-                    Player_Data.HP = BitConverter.ToUInt32(packet, 0x08 + index);
-                    Player_Data.MP = BitConverter.ToUInt32(packet, 0x0C + index);
-                    Player_Data.TP = BitConverter.ToUInt32(packet, 0x10 + index);
-                    Player_Data.targid = BitConverter.ToUInt16(packet, 0x14 + index);
-
-                    // packet[0x16] //HPP
-                    // packet[0x17] //MPP
-                    // packet[0x20] //Job
-                    // packet[0x21] //Job level
-                    // packet[0x22] //Sub Job
-                    // packet[0x23] //Sub Job level
-                    // Excluded from trust packet
-                    // packet[0x24] // Master Level
-                    // packet[0x25] // Master Breaker
-                }
-                else
-                {
-                    if (!silient)
-                        Console.WriteLine("[Parse]Got DF for another charater");
-                }
-            }
-            else
-            {
-                if (!silient)
-                    Console.WriteLine("[Parse]Incorect size in incoming 0xDF Packet");
-            }
-        }
-        //Zone in
-        void P00A(byte[] packet, int size, int index)
-        {
-            var ExpectedSize = 0x82;
-            if (size == ExpectedSize)
-            {
-                Player_Data.ID = BitConverter.ToUInt32(packet, 0x04 + index);
-                Player_Data.targid = BitConverter.ToUInt16(packet, 0x08 + index);
-                Player_Data.pos.Rot = packet[0x0B + index];
-                Player_Data.pos.X = BitConverter.ToSingle(packet, 0x0C + index);
-                Player_Data.pos.Y = BitConverter.ToSingle(packet, 0x10 + index);
-                Player_Data.pos.Z = BitConverter.ToSingle(packet, 0x14 + index);
-                Player_Data.pos.moving = 0;
-                Player_Data.Job = packet[0xB4 + index];
-                Player_Data.SubJob = packet[0xB7 + index];
-                Player_Data.MaxHP = BitConverter.ToUInt32(packet, 0xE8 + index);
-                Player_Data.MaxMP = BitConverter.ToUInt32(packet, 0xEC + index);
-                Player_Data.Str = BitConverter.ToUInt16(packet, 0xCC + index);
-                Player_Data.Dex = BitConverter.ToUInt16(packet, 0xCC + 2 + index);
-                Player_Data.Vit = BitConverter.ToUInt16(packet, 0xCC + 4 + index);
-                Player_Data.Agi = BitConverter.ToUInt16(packet, 0xCC + 6 + index);
-                Player_Data.Int = BitConverter.ToUInt16(packet, 0xCC + 8 + index);
-                Player_Data.Mnd = BitConverter.ToUInt16(packet, 0xCC + 10 + index);
-                Player_Data.Chr = BitConverter.ToUInt16(packet, 0xCC + 12 + index);
-                if (!silient)
-                    Console.WriteLine("Id:{0:G} Rot:{1:G} {2:G},{3:G},{4:G} {5:G}/{6:G} MaxHP:{7:G} MaxMP:{8:G} Str:{9:G} Chr:{10:G}", Player_Data.ID, Player_Data.pos.Rot, Player_Data.pos.X, Player_Data.pos.Y, Player_Data.pos.Z, Player_Data.Job, Player_Data.SubJob, Player_Data.MaxHP, Player_Data.MaxMP, Player_Data.Str, Player_Data.Chr);
-                Player_Data.zone.ID = BitConverter.ToUInt16(packet, 0x30 + index);
-                Player_Data.zone.Weather = BitConverter.ToUInt16(packet, 0x68 + index);
-                Player_Data.zone.Weather_time = BitConverter.ToUInt32(packet, 0x6A + index);
-                Player_Data.zone.Music_BG_Day = packet[0x56 + index];
-                Player_Data.zone.Music_BG_Night = packet[0x58 + index];
-                Player_Data.zone.Music_Battle_Solo = packet[0x5A + index];
-                Player_Data.zone.Music_Battle_Party = packet[0x5C + index];
-            }
-            else
-            {
-                if (!silient)
-                    Console.WriteLine("[Parse]Incorect size in incoming 00A Packet Expected {0:X} Got {1:X}", ExpectedSize, size);
-            }
-
-            Task.Run(() => OutGoing_O11()); // Send Zone in confirmation
-
-        }
 
         [Flags]
         public enum SendFlags : byte
@@ -1224,8 +774,8 @@ namespace HeadlessFFXI
             Model = 1 << 4,
             Despawn = 1 << 5,
             Name2 = 1 << 6
-
         }
+
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         public struct Flags0
         {
@@ -1276,185 +826,76 @@ namespace HeadlessFFXI
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         public struct StatusFlags
         {
-            public byte RawValue;
+            public uint RawValue;
 
-            private const byte MonsterFlagMask  = 1 << 0;
-            private const byte HideFlagMask     = 1 << 1;
-            private const byte SleepFlagMask    = 1 << 2;
-            private const byte Unknown_0_3Mask  = 1 << 3;
-            private const byte Unknown_0_4Mask  = 1 << 4;
-            private const byte ChocoboIndexMask = 0b111 << 5; // bits 5–7
+            // Bit masks
+            private const uint MonsterFlagMask     = 1u << 0;
+            private const uint HideFlagMask        = 1u << 1;
+            private const uint SleepFlagMask       = 1u << 2;
+            private const uint Unknown_0_3Mask     = 1u << 3;
+            private const uint Unknown_0_4Mask     = 1u << 4;
+            private const uint ChocoboIndexMask    = 0b111u << 5;
+            private const uint CliPosInitFlagMask  = 1u << 8;
+            private const uint GraphSizeMask       = 0b11u << 9;
+            private const uint LfgFlagMask         = 1u << 11;
+            private const uint AnonymousFlagMask   = 1u << 12;
+            private const uint YellFlagMask        = 1u << 13;
+            private const uint AwayFlagMask        = 1u << 14;
+            private const uint GenderMask          = 1u << 15;
+            private const uint PlayOnlineFlagMask  = 1u << 16;
+            private const uint LinkShellFlagMask   = 1u << 17;
+            private const uint LinkDeadFlagMask    = 1u << 18;
+            private const uint TargetOffFlagMask   = 1u << 19;
+            private const uint TalkUcoffFlagMask   = 1u << 20;
+            private const uint Unknown_2_5Mask     = 1u << 21;
+            private const uint Unknown_2_6Mask     = 1u << 22;
+            private const uint Unknown_2_7Mask     = 1u << 23;
+            private const uint GmLevelMask         = 0b111u << 24;
+            private const uint HackMoveMask        = 1u << 27;
+            private const uint Unknown_3_4Mask     = 1u << 28;
+            private const uint InvisFlagMask       = 1u << 29;
+            private const uint TurnFlagMask        = 1u << 30;
+            private const uint BazaarFlagMask      = 1u << 31;
 
+            // Accessors
             public bool MonsterFlag
             {
                 readonly get => (RawValue & MonsterFlagMask) != 0;
-                set => RawValue = value ? (byte)(RawValue | MonsterFlagMask) : (byte)(RawValue & ~MonsterFlagMask);
+                set => RawValue = value ? (RawValue | MonsterFlagMask) : (RawValue & ~MonsterFlagMask);
             }
 
             public bool HideFlag
             {
                 readonly get => (RawValue & HideFlagMask) != 0;
-                set => RawValue = value ? (byte)(RawValue | HideFlagMask) : (byte)(RawValue & ~HideFlagMask);
+                set => RawValue = value ? (RawValue | HideFlagMask) : (RawValue & ~HideFlagMask);
             }
 
             public bool SleepFlag
             {
                 readonly get => (RawValue & SleepFlagMask) != 0;
-                set => RawValue = value ? (byte)(RawValue | SleepFlagMask) : (byte)(RawValue & ~SleepFlagMask);
+                set => RawValue = value ? (RawValue | SleepFlagMask) : (RawValue & ~SleepFlagMask);
             }
 
-            public bool Unknown_0_3
-            {
-                readonly get => (RawValue & Unknown_0_3Mask) != 0;
-                set => RawValue = value ? (byte)(RawValue | Unknown_0_3Mask) : (byte)(RawValue & ~Unknown_0_3Mask);
-            }
-
-            public bool Unknown_0_4
-            {
-                readonly get => (RawValue & Unknown_0_4Mask) != 0;
-                set => RawValue = value ? (byte)(RawValue | Unknown_0_4Mask) : (byte)(RawValue & ~Unknown_0_4Mask);
-            }
+            // ... repeat pattern for other flags as needed ...
 
             public byte ChocoboIndex
             {
                 readonly get => (byte)((RawValue & ChocoboIndexMask) >> 5);
-                set => RawValue = (byte)((RawValue & ~ChocoboIndexMask) | ((value & 0b111) << 5));
+                set => RawValue = (RawValue & ~ChocoboIndexMask) | ((uint)(value & 0b111) << 5);
+            }
+
+            public byte GraphSize
+            {
+                readonly get => (byte)((RawValue & GraphSizeMask) >> 9);
+                set => RawValue = (RawValue & ~GraphSizeMask) | ((uint)(value & 0b11) << 9);
+            }
+
+            public byte GmLevel
+            {
+                readonly get => (byte)((RawValue & GmLevelMask) >> 24);
+                set => RawValue = (RawValue & ~GmLevelMask) | ((uint)(value & 0b111) << 24);
             }
         }
-
-        //Char Update
-        void P00D(byte[] packet, int size, int index)
-        {
-            var charID = BitConverter.ToUInt32(packet, index + 0x04);
-            var updateIndex = BitConverter.ToUInt16(packet, index + 0x08);
-
-            SendFlags updateFlags = (SendFlags)packet[index + 0x0A];
-            //Console.WriteLine("Char Update for ID:{0:G} Index:{1:G}", charID, updateIndex);
-            //Console.WriteLine(updateFlags);
-            if (updateFlags.HasFlag(SendFlags.Position))
-            {
-                Entity_List[updateIndex].IsValid = true;
-                EntityType entityType = EntityType.PC;
-                Entity_List[updateIndex].Type = (byte)entityType;
-                var rot = packet[index + 0x0B];
-                var x = BitConverter.ToSingle(packet, index + 0x0C);
-                var y = BitConverter.ToSingle(packet, index + 0x10);
-                var z = BitConverter.ToSingle(packet, index + 0x14);
-                Entity_List[updateIndex].Pos.Rot = rot;
-                Entity_List[updateIndex].Pos.X = x;
-                Entity_List[updateIndex].Pos.Y = y;
-                Entity_List[updateIndex].Pos.Z = z;
-                Flags0 flags0 = new Flags0 { Raw = BitConverter.ToUInt32(packet, index + 0x18) };
-                var targetindex = flags0.FaceTarget; // Index to entitys target
-                Entity_List[updateIndex].TargetIndex = targetindex;
-
-                //var speed = packet[index + 0x1C];
-                //var speedbase = packet[index + 0x1D];
-
-                Player_Data.pos.Rot = rot;
-                Player_Data.pos.X = x;
-                Player_Data.pos.Y = y;
-                Player_Data.pos.Z = z;
-                //Player_Data.pos.moving = flags0.MovTime;
-
-            }
-
-            if (updateFlags.HasFlag(SendFlags.General))
-            {
-                Entity_List[updateIndex].IsValid = true;
-                var Hpp = packet[index + 0x1E];
-                var server_status = packet[index + 0x1F];
-                Entity_List[updateIndex].Hpp = Hpp;
-                Entity_List[updateIndex].Status = server_status;
-            }
-
-            if (updateFlags.HasFlag(SendFlags.Model))
-            {
-                // Look data who cares
-            }
-
-            if (updateFlags.HasFlag(SendFlags.Name))
-            {
-                Entity_List[updateIndex].IsValid = true;
-                var name = System.Text.Encoding.UTF8.GetString(packet, index + 0x5A, 15).TrimEnd('\0');
-                Entity_List[updateIndex].Name = name;
-            }
-
-            if (updateFlags.HasFlag(SendFlags.Name) || updateFlags.HasFlag(SendFlags.General))
-            {
-                //var Flag6 = new Flags6 { Raw = BitConverter.ToUInt32(packet, index + 0x44) };
-                //Flag6.MountIndex
-            }
-
-            if (updateFlags.HasFlag(SendFlags.Despawn))
-            {
-                Entity_List[updateIndex] = new Entity();
-            }
-            else
-            {
-                var CostumeId = BitConverter.ToUInt16(packet, index + 0x30);
-                var PetActIndex = BitConverter.ToUInt16(packet, index + 0x3C);
-            }
-        }
-        //Entity Update
-        void P00E(byte[] packet, int size, int index)
-        {
-            var entityID = BitConverter.ToUInt32(packet, index + 0x04);
-            var updateIndex = BitConverter.ToUInt16(packet, index + 0x08);
-
-            SendFlags updateFlags = (SendFlags)packet[index + 0x0A];
-
-            if (updateFlags.HasFlag(SendFlags.Despawn))
-            {
-                Console.WriteLine("Entity Despawn for ID:{0:G} Index:{1:G} Name:{2:G}", entityID, updateIndex, Entity_List[updateIndex].Name);
-                Entity_List[updateIndex] = new Entity();
-            }
-            else
-            {
-                Entity_List[updateIndex].Status = packet[index + 0x20];
-                StatusFlags flags = new StatusFlags { RawValue = Entity_List[updateIndex].Status };
-                EntityType entityType = flags.MonsterFlag ? EntityType.Mob : EntityType.NPC;
-                Entity_List[updateIndex].Type = (byte)entityType;
-
-                if (updateFlags.HasFlag(SendFlags.Position))
-                {
-                    Entity_List[updateIndex].IsValid = true;
-                    var rot = packet[index + 0x0B];
-                    var x = BitConverter.ToSingle(packet, index + 0x0C);
-                    var y = BitConverter.ToSingle(packet, index + 0x10);
-                    var z = BitConverter.ToSingle(packet, index + 0x14);
-                    Entity_List[updateIndex].Pos.Rot = rot;
-                    Entity_List[updateIndex].Pos.X = x;
-                    Entity_List[updateIndex].Pos.Y = y;
-                    Entity_List[updateIndex].Pos.Z = z;
-                    Flags0 flags0 = new Flags0 { Raw = BitConverter.ToUInt32(packet, index + 0x18) };
-                    var targetindex = flags0.FaceTarget; // Index to entitys target
-                    Entity_List[updateIndex].TargetIndex = targetindex;
-
-                    //var speed = packet[index + 0x1C];
-                    //var speedbase = packet[index + 0x1D];
-
-                }
-
-                if (updateFlags.HasFlag(SendFlags.General))
-                {
-                    Entity_List[updateIndex].IsValid = true;
-                    var Hpp = packet[index + 0x1E];
-                    var server_status = packet[index + 0x1F];
-                    Entity_List[updateIndex].Hpp = Hpp;
-                    Entity_List[updateIndex].Animation = server_status;
-                }
-
-                if (updateFlags.HasFlag(SendFlags.Name))
-                {
-                    Entity_List[updateIndex].IsValid = true;
-                    var name = System.Text.Encoding.UTF8.GetString(packet, index + 0x34, 15).TrimEnd('\0');
-                    Entity_List[updateIndex].Name = name;
-                }
-            }
-
-        }
-        #endregion
 
         #region Outgoing Packets
         // Char Pos
@@ -1503,7 +944,7 @@ namespace HeadlessFFXI
 
         }
         // Zone in confirmation
-        void OutGoing_O11()
+        public void OutGoing_O11()
         {
             Thread.Sleep(500);
 
@@ -2082,7 +1523,7 @@ namespace HeadlessFFXI
 
     }
     #region Structs
-    struct My_Player
+    public struct My_Player
     {
         public uint ID;
         public string Name;
@@ -2108,7 +1549,7 @@ namespace HeadlessFFXI
         public UInt16 Chr;
         public Inventory Inv;
     }
-    struct Zone_Info
+    public struct Zone_Info
     {
         public UInt16 ID;
         public UInt16 Weather;
@@ -2118,7 +1559,7 @@ namespace HeadlessFFXI
         public byte Music_BG_Day;
         public byte Music_BG_Night;
     }
-    struct Position
+    public struct Position
     {
         public float X;
         public float Y;
@@ -2141,17 +1582,17 @@ namespace HeadlessFFXI
         public string Password;
         public byte[] SessionHash;
     }
-    struct Inventory
+    public struct Inventory
     {
         public Storage[] Container;
     }
-    struct Storage
+    public struct Storage
     {
         public byte size;
         public UInt16 available;
         public InventorySlot[] slots;
     }
-    struct InventorySlot
+    public struct InventorySlot
     {
         public UInt16 itemid;
         public UInt32 quantity;
@@ -2165,7 +1606,7 @@ namespace HeadlessFFXI
         public string server;
         public int char_slot;
     }
-    struct Entity
+    public struct Entity
     {
         public bool IsValid;
         public byte Type;
