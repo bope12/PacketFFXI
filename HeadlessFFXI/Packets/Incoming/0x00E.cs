@@ -39,6 +39,9 @@ public class P00EHandler : IPacketHandler
         int subKind = raw & 0x7;
         int status = (raw >> 3) & 0x1FFF;
 
+        if(client.Entity_List[entityIndex] == null)
+            client.Entity_List[entityIndex] = new Entity();
+
         if (updateFlags.HasFlag(SendFlags.Despawn))
         {
             Console.WriteLine("Entity Despawn for ID:{0:G} Index:{1:G} Name:{2:G}", entityId, entityIndex, client.Entity_List[entityIndex].Name);

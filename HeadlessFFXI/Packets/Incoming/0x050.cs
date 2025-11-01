@@ -15,5 +15,8 @@ public class P050Handler : IPacketHandler
         byte invslot = dataReader.ReadByte();
         byte equipslot = dataReader.ReadByte();
         byte container = dataReader.ReadByte();
+        client.Player_Data.Equip[equipslot].InventorySlot = invslot;
+        client.Player_Data.Equip[equipslot].Container = container;
+        //Console.WriteLine("[0x050] Equip Slot:{0} Item Slot:{1} Container:{2}", equipslot, invslot, container);
     }
 }

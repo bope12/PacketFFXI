@@ -4,7 +4,7 @@ using System.IO;
 
 namespace HeadlessFFXI
 {
-    class zlib
+    public class zlib
     {
         public uint[] jump;
         public uint[] enc = null;

@@ -36,8 +36,8 @@ public class P00AHandler : IPacketHandler
             client.Player_Data.Int = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice( 0xCC + 8, 2));
             client.Player_Data.Mnd = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice( 0xCC + 10, 2));
             client.Player_Data.Chr = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice( 0xCC + 12, 2));
-            if (!client.silient)
-                Console.WriteLine("Id:{0:G} Rot:{1:G} {2:G},{3:G},{4:G} {5:G}/{6:G} MaxHP:{7:G} MaxMP:{8:G} Str:{9:G} Chr:{10:G}", client.Player_Data.ID, client.Player_Data.pos.Rot, client.Player_Data.pos.X, client.Player_Data.pos.Y, client.Player_Data.pos.Z, client.Player_Data.Job, client.Player_Data.SubJob, client.Player_Data.MaxHP, client.Player_Data.MaxMP, client.Player_Data.Str, client.Player_Data.Chr);
+            //if (!client.silient)
+            //    Console.WriteLine("Id:{0:G} Rot:{1:G} {2:G},{3:G},{4:G} {5:G}/{6:G} MaxHP:{7:G} MaxMP:{8:G} Str:{9:G} Chr:{10:G}", client.Player_Data.ID, client.Player_Data.pos.Rot, client.Player_Data.pos.X, client.Player_Data.pos.Y, client.Player_Data.pos.Z, client.Player_Data.Job, client.Player_Data.SubJob, client.Player_Data.MaxHP, client.Player_Data.MaxMP, client.Player_Data.Str, client.Player_Data.Chr);
             client.Player_Data.zone.ID = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(0x30, 2));
             client.Player_Data.zone.Weather = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice( 0x68, 2));
             client.Player_Data.zone.Weather_time = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice( 0x6A, 4));

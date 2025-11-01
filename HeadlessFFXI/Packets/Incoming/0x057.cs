@@ -10,8 +10,12 @@ public class P057Handler : IPacketHandler
 
     public void Handle(Client client, ReadOnlySpan<byte> data)
     {
-        //uint32_t StartTime;
-        //Weather  WeatherNumber;
-        //uint16_t WeatherOffsetTime;
+        var dataReader = new PacketReader(data);
+        dataReader.Skip(0x04); // skip header
+        uint startTime = dataReader.ReadUInt32();
+        ushort weatherNumber = dataReader.ReadUInt16();
+        ushort weatherOffsetTime = dataReader.ReadUInt16();
+        client.Player_Data.zone.Weather = weatherNumber;
+        client.Player_Data.zone.Weather_time = startTime;
     }
 }

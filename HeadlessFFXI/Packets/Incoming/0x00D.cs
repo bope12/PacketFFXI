@@ -40,6 +40,9 @@ public class P00DHandler : IPacketHandler
         uint customProperty2 = dataReader.ReadUInt32();
         ushort petActIndex = dataReader.ReadUInt16();
 
+        if(client.Entity_List[charIndex] == null)
+            client.Entity_List[charIndex] = new Entity();
+
         //Console.WriteLine("Char Update for ID:{0:G} Index:{1:G}", charID, updateIndex);
         //Console.WriteLine(updateFlags);
         if (updateFlags.HasFlag(SendFlags.Position))
@@ -61,6 +64,7 @@ public class P00DHandler : IPacketHandler
         }
         if (updateFlags.HasFlag(SendFlags.General))
         {
+            client.Entity_List[charIndex].ID = charId;
             client.Entity_List[charIndex].IsValid = true;
             client.Entity_List[charIndex].Hpp = hpp;
             client.Entity_List[charIndex].Status = serverStatus;
