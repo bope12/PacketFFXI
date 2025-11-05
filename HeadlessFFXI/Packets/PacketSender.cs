@@ -15,16 +15,16 @@ public class PacketSender : IDisposable
     private readonly Timer _timer;
     private readonly object _lock = new();
 
-    private ushort _clientPacketId = 2;
-    private ushort _serverPacketId; // last received from server
+    private ushort _clientPacketId = 1;
+    private ushort _serverPacketId = 1; // last received from server
 
     private const int PacketHead = 28; // whatever fixed header you start with
     static MD5 hasher = System.Security.Cryptography.MD5.Create();
-    private readonly zlib _zlib;
-    private readonly Blowfish _blowfish;
+    private readonly Zlib _zlib;
+    private Blowfish _blowfish;
     private bool _disposed = false;
 
-    public PacketSender(OutgoingQueue queue, UdpClient server, Blowfish blowfish, zlib myzlib)
+    public PacketSender(OutgoingQueue queue, UdpClient server, Blowfish blowfish, Zlib myzlib)
     {
         _queue = queue;
         _server = server;
@@ -37,6 +37,15 @@ public class PacketSender : IDisposable
     {
         lock (_lock)
             _serverPacketId = id;
+    }
+    public void UpdateClientPacketId(ushort id)
+    {
+        lock (_lock)
+            _clientPacketId = id;
+    }
+    public void UpdateBlowfish(Blowfish blowfish)
+    {
+        _blowfish = blowfish;
     }
 
     private void SendTick(object? state)
@@ -129,9 +138,9 @@ public class PacketSender : IDisposable
     public void packet_Encode(ref byte[] data)
     {
         //Lets encipher this packet
-        uint CypherSize = (uint)((data.Length / 4) & ~1); // same as & -2
+        int CypherSize = (int)((data.Length / 4) & ~1); // same as & -2
 
-        for (uint j = 0; j < CypherSize; j += 2)
+        for (int j = 0; j < CypherSize; j += 2)
         {
             int offset1 = (int)(4 * (j + 7));
             int offset2 = (int)(4 * (j + 8));

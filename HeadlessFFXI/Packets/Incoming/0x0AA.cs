@@ -11,6 +11,8 @@ public class P0AAHandler : IPacketHandler
     public void Handle(Client client, ReadOnlySpan<byte> data)
     {
         // This packet is sent by the server to populate the clients list of available magic spells.
-        // uint8_t MagicDataTbl[128]; // PS2: MagicDataTbl
+        var dataReader = new PacketReader(data);
+        dataReader.Skip(4);
+        client.Player_Data.SpellList = dataReader.ReadBytes(128).ToArray();
     }
 }
