@@ -211,18 +211,21 @@ namespace FFXISpellData
 
         private static Dictionary<int, int> ExtractLevels(string properties)
         {
+            Console.WriteLine(properties);
             var levels = new Dictionary<int, int>();
-            var levelsMatch = Regex.Match(properties, @"levels=\{([^}]+)\}");
+            var levelsMatch = Regex.Match(properties, @"levels=\{(.*?)\}");
 
             if (levelsMatch.Success)
             {
+                Console.WriteLine("levels");
                 var levelsContent = levelsMatch.Groups[1].Value;
-                var levelMatches = Regex.Matches(levelsContent, @"\[(\d+)\]=(\d+)");
+                var levelMatches = Regex.Matches(properties, @"\[(\d+)\]\s*=\s*(\d+)");
 
                 foreach (Match levelMatch in levelMatches)
                 {
                     var jobId = int.Parse(levelMatch.Groups[1].Value);
                     var level = int.Parse(levelMatch.Groups[2].Value);
+                    Console.WriteLine("{0:G} {1:G}",jobId, level);
                     levels[jobId] = level;
                 }
             }

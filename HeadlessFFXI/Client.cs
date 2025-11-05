@@ -464,6 +464,8 @@ namespace HeadlessFFXI
                 logoutPacket2.SetSize(0x04);
                 Packetqueue.Enqueue(logoutPacket2);
 
+                await Task.Delay(600); // Give packets time to send
+
                 data = new byte[8];
                 BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(0x04), (ushort)0x03);
                 BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(0x06), (ushort)0x03);
@@ -476,7 +478,7 @@ namespace HeadlessFFXI
                 if (!silient)
                     Console.WriteLine("[Game]Log Out sent");
 
-                await Task.Delay(500); // Give packets time to send
+                await Task.Delay(600); // Give packets time to send
             }
 
             await CleanupGameSession();
@@ -484,7 +486,6 @@ namespace HeadlessFFXI
             datastream?.Close();
             viewstream?.Close();
 
-            await Task.Delay(500);
             Exit();
         }
 
@@ -499,7 +500,7 @@ namespace HeadlessFFXI
             // Start the incoming packet parser
             _incomingTask = Task.Run(() => ParseIncomingPacket(_incCts.Token), _incCts.Token);
 
-            Spellrepo = SpellLuaParser.ParseFile(@"D:\Windower\res\spells.lua");
+            //Spellrepo = SpellLuaParser.ParseFile(@"D:\Windower\res\spells.lua");
 
             // Do initial zone login
             await Task.Run(() => Logintozone(true), _posCts.Token);
@@ -945,6 +946,34 @@ namespace HeadlessFFXI
             }
         }
 
+        public bool CanUseSpell(uint spellId)
+        {
+            // Check if spell is learned
+            int byteIndex = (int)(spellId / 8);
+            int bitIndex = (int)(spellId % 8);
+            if (byteIndex < 0 || byteIndex >= Player_Data.SpellList.Length)
+                return false;
+
+            bool learned = (Player_Data.SpellList[byteIndex] & (1 << bitIndex)) != 0;
+
+            if (!learned)
+                return false;
+
+            return true;
+/* Regex on spell parsing is boinked fix later
+            var spell = Spellrepo.GetById(spellId);
+
+            var mjob = Player_Data.Job;
+            var mjob_level = Player_Data.Level;
+            var sjob = Player_Data.SubJob;
+            var sjob_level = Player_Data.SubLevel;
+
+            if ((spell.Levels.ContainsKey(mjob) && spell.Levels[mjob] < mjob_level) || (spell.Levels.ContainsKey(sjob) && spell.Levels[sjob] < sjob_level))
+                return true;
+
+            return false;
+*/
+        }
         #endregion
         #region Movement
         public void Mount(uint mountId)
@@ -1322,6 +1351,7 @@ namespace HeadlessFFXI
         public byte Job;
         public byte SubJob;
         public byte Level;
+        public byte SubLevel = 37;
         public byte zoneid;
         public Zone_Info zone;
         public Position pos;

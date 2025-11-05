@@ -1,14 +1,9 @@
 ﻿using System;
-using System.Net.Sockets;
 using System.IO;
-using System.Security.Cryptography;
+using System.Linq;
 using System.Threading;
-using System.Net;
-using System.IO.Compression;
-using System.Diagnostics;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
+using static HeadlessFFXI.Client;
 
 namespace HeadlessFFXI
 {
@@ -87,16 +82,53 @@ namespace HeadlessFFXI
                 settings.password = Console.ReadLine();
             }
             #endregion
-            User = new Client(settings,true,false);
+            User = new Client(settings, true, false);
             await User.Login();
+            User.IncomingChat += YourObject_IncomingChat;
+            User.IncomingPartyInvite += YourObject_IncomingPartyInvite;
             Thread.Sleep(2000000);
-            User.Logout();
-            Exit();
+            await Exit();
             return;
         }
-        static void Exit()
+        static async Task Exit()
         {
             System.Environment.Exit(1);
         }
+
+        // Event handler method
+        private static void YourObject_IncomingChat(object sender, IncomingChatEventArgs e)
+        {
+            var client = (Client)sender;
+            //Console.WriteLine($"Chat from {e.Name}: {e.Message}");
+            //Console.WriteLine($"Type: {e.MessageType}, IsGM: {e.IsGM}, Zone: {e.ZoneID}");
+            if (e.Message.ToLower().Contains("logout"))
+            {
+                client.Logout();
+            }
+            else if (e.Message.ToLower().Contains("invite"))
+                client.SendPartyInvite(e.Name);
+            else if (e.Message.ToLower().Contains("attack"))
+            {
+                var targetIndexarg = e.Message[7..];
+                var targetindex = UInt16.Parse(targetIndexarg);
+                client.Attack(targetindex);
+            }
+            else if (e.Message.ToLower().Contains("cast"))
+            {
+                var cure = client.Spellrepo.GetByName("cure");
+                client.CastMagic(1024, cure.Id);
+                Console.WriteLine(client.CanUseSpell(1).ToString() + " " + client.CanUseSpell(128).ToString());
+            }
+            else
+                client.SendTell(e.Name, e.Message);
+            // Do whatever you need with the data
+        }
+        private static void YourObject_IncomingPartyInvite(object sender, IncomingPartyInviteEventArgs e)
+        {
+            var client = (Client)sender;
+            client.PartyInviteResponce(true);
+        }
+
+
     }
 }
