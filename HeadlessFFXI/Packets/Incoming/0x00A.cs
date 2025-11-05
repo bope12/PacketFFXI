@@ -18,7 +18,7 @@ public class P00AHandler : IPacketHandler
             var dataReader = new PacketReader(data);
             dataReader.Skip(4); //skip header
             client.Player_Data.ID = dataReader.ReadUInt32();
-            client.Player_Data.targid = dataReader.ReadUInt16();
+            client.Player_Data.Index = dataReader.ReadUInt16();
             dataReader.Skip(1); //skip some unk bytes
             client.Player_Data.pos.Rot = dataReader.ReadByte();
             client.Player_Data.pos.X = dataReader.ReadFloat();

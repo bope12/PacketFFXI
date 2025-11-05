@@ -42,7 +42,7 @@ public class P0DFHandler : IPacketHandler
             client.Player_Data.HP = hp;
             client.Player_Data.MP = mp;
             client.Player_Data.TP = tp;
-            client.Player_Data.targid = targetIndex;
+            client.Player_Data.Index = targetIndex;
         }
     }
 }

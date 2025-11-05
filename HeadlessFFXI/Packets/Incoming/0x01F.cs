@@ -12,7 +12,7 @@ public class P01FHandler : IPacketHandler
     {
         //TODO check if this should be resetting item or if 0x20 does\
         var dataReader = new PacketReader(data);
-        dataReader.ReadBytes(0x04); // skip header
+        dataReader.Skip(0x04); // skip header
         uint quantity = dataReader.ReadUInt32();
         UInt16 itemId = dataReader.ReadUInt16();
         byte container = dataReader.ReadByte();
