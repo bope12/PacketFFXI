@@ -42,6 +42,10 @@ public class P0DFHandler : IPacketHandler
             client.Player_Data.HP = hp;
             client.Player_Data.MP = mp;
             client.Player_Data.TP = tp;
+            client.Player_Data.Job = mjob;
+            client.Player_Data.SubJob = sjob;
+            client.Player_Data.Level = mjobLevel;
+            client.Player_Data.SubLevel = sjobLevel;
             client.Player_Data.Index = targetIndex;
         }
     }
