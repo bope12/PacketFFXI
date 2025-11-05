@@ -2,6 +2,7 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x000B
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x00b_logout.cpp
 using System;
+using System.Net;
 using HeadlessFFXI;
 
 public class P00BHandler : IPacketHandler
@@ -13,20 +14,16 @@ public class P00BHandler : IPacketHandler
         var dataReader = new PacketReader(data);
         dataReader.Skip(4); // Skip header
         byte LogoutState = dataReader.ReadByte();
-        uint ip = dataReader.ReadUInt32();
-        uint port = dataReader.ReadUInt32();
-        if (LogoutState == 1) //logout
-        {
-
-        }
-        else if (LogoutState == 2) //zone change
-        {
-            //Handle zone change logic here
-            client.HandleZoneChange(ip, port);
-            //We need to increment the blowfish key for the new zone
-        }
+        dataReader.Skip(3); // Skip padding to align to next uint32
+        uint ipRaw = dataReader.ReadUInt32();
+        uint portRaw = dataReader.ReadUInt32();
+        ushort port = (ushort)(portRaw & 0xFFFF); // Get lower 2 bytes
         //uint8_t  padding00[8];
         //GP_GAME_ECODE        cliErrCode;  // PS2: cliErrCode only ever GP_GAME_ECODE::NOERR; on lsb
+
+        if (LogoutState == 2)
+            client.HandleZoneChange(ipRaw, port);
+
     }
     // PS2: GP_GAME_LOGOUT_STATE
     //enum class GP_GAME_LOGOUT_STATE : uint8_t
