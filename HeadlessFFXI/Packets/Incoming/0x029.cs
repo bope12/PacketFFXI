@@ -10,7 +10,7 @@ public class P029Handler : IPacketHandler
 
     public void Handle(Client client, ReadOnlySpan<byte> data)
     {
-        Console.WriteLine("[P029Handler] Handler not yet implemented. Size: {data.Length}");
+        //Console.WriteLine("[P029Handler] Handler not yet implemented. Size: {data.Length}");
         // TODO: Implement handler logic here
     }
 }

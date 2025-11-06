@@ -24,9 +24,9 @@ namespace HeadlessFFXI
     {
         #region Vars
         const int Packet_Head = 28;
-        uint[] startingkey = { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xAD5DE056 }; // ;
+        uint[] startingkey = { 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xAD5DE056 };
         public bool chardata;
-        public bool silient;
+        public byte LogLevel;
         private Blowfish _currentBlowfish;
         private readonly object _blowfishLock = new object();
 
@@ -74,21 +74,20 @@ namespace HeadlessFFXI
         public SpellRepository Spellrepo;
         #endregion
         #region Loginproccess
-        public Client(Config cfg, bool Full = true, bool log = false)
+        public Client(Config cfg, bool Full = true, byte log = 4)
         {
             Account_Data.Username = cfg.user;
             Account_Data.Password = cfg.password;
             Account_Data.Char_Slot = cfg.char_slot;
             loginserver = cfg.server;
             chardata = Full;
-            silient = log;
+            LogLevel = log;
         }
         public async Task<bool> Login()
         {
             Console.SetOut(new TimestampTextWriter(Console.Out));
             myzlib = new Zlib();
             myzlib.Init();
-            //Console.WriteLine("[Info]Attempting to login");
             try
             {
                 //AppContext.SetSwitch("System.Net.Security.UseNetworkFramework", true);
@@ -97,7 +96,7 @@ namespace HeadlessFFXI
                 using var sslStream = new SslStream(
                 client.GetStream(),
                 leaveInnerStreamOpen: false,
-                userCertificateValidationCallback: (sender, certificate, chain, sslPolicyErrors) => true // ⚠️ Only for testing!
+                userCertificateValidationCallback: (sender, certificate, chain, sslPolicyErrors) => true
                 );
 
                 var jsonData = new Dictionary<string, object>
@@ -110,35 +109,31 @@ namespace HeadlessFFXI
                     ["command"] = 0x10
                 };
 
-                // Serialize to JSON string
                 var options = new JsonSerializerOptions { WriteIndented = false };
                 string jsonString = JsonSerializer.Serialize(jsonData, options);
 
-                // Get byte length (UTF-8) and copy into a new byte[] (equivalent to your bytearray + memcpy)
                 int jsonLen = Encoding.UTF8.GetByteCount(jsonString);
                 byte[] data = new byte[jsonLen];
 
-                // Fill the data buffer with the UTF-8 bytes of the JSON string
-                // This matches exactly creating a zero-length byte array and memcpy'ing the string bytes into it
                 Encoding.UTF8.GetBytes(jsonString, 0, jsonString.Length, data, 0);
 
                 var ssloptions = new SslClientAuthenticationOptions
                 {
                     TargetHost = loginserver,
-                    EnabledSslProtocols = SslProtocols.Tls13, // <-- This is the key line
+                    EnabledSslProtocols = SslProtocols.Tls13,
                     CertificateRevocationCheckMode = X509RevocationMode.NoCheck
                 };
 
                 try
                 {
                     await sslStream.AuthenticateAsClientAsync(ssloptions);
-                    Console.WriteLine($"Connected using {sslStream.SslProtocol}");
+                    ShowInfo($"[Login]Connected using {sslStream.SslProtocol}");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Handshake failed: {ex.GetType().Name} - {ex.Message}");
+                    ShowError($"[Login]Handshake failed: {ex.GetType().Name} - {ex.Message}");
                     if (ex.InnerException != null)
-                        Console.WriteLine($"Inner: {ex.InnerException.GetType().Name} - {ex.InnerException.Message}");
+                        ShowError($"[Login]Inner: {ex.InnerException.GetType().Name} - {ex.InnerException.Message}");
                 }
 
                 await sslStream.WriteAsync(data, 0, jsonLen);
@@ -149,7 +144,7 @@ namespace HeadlessFFXI
                 sslStream.Close();
 
                 string rawResponse = Encoding.UTF8.GetString(indata, 0, bytesRead).Replace("'", "\"");
-                Console.WriteLine(rawResponse);
+                //Console.WriteLine(rawResponse);
                 Dictionary<string, JsonElement>? jsonInData = null;
                 try
                 {
@@ -157,12 +152,12 @@ namespace HeadlessFFXI
                 }
                 catch (JsonException ex)
                 {
-                    Console.WriteLine($"[WARN] Invalid JSON: {ex.Message}");
+                    ShowError($"[Login]Invalid JSON: {ex.Message}");
                     throw;
                 }
                 catch (DecoderFallbackException ex)
                 {
-                    Console.WriteLine($"[WARN] UTF-8 decoding error: {ex.Message}");
+                    ShowError($"[Login]UTF-8 decoding error: {ex.Message}");
                     throw;
                 }
 
@@ -191,15 +186,13 @@ namespace HeadlessFFXI
                 switch (Result)
                 {
                     case 0x0001: //Login Success
-                        //Console.WriteLine("[Login]Logged In");
                         Account_Data.ID = (uint)AccountId;
-                        if (!silient)
-                            Console.WriteLine("[Info]Account id:{0:D}", Account_Data.ID);
+                        ShowInfo($"[Login]Account id:{Account_Data.ID}");
                         Account_Data.SessionHash = SessionHash;
                         lobbydata = new TcpClient(AddressFamily.InterNetwork);
                         await lobbydata.ConnectAsync(loginserver, 54230);
                         datastream = lobbydata.GetStream();
-                        Byte[] dataByte = new Byte[28];
+                        byte[] dataByte = new byte[28];
                         dataByte[0] = 0xFE;
                         System.Buffer.BlockCopy(Account_Data.SessionHash, 0, dataByte, 12, Account_Data.SessionHash.Length);
                         await datastream.WriteAsync(dataByte, 0, dataByte.Length);
@@ -213,13 +206,11 @@ namespace HeadlessFFXI
                         await LobbyData0xA2();
                         break;
                     case 0x0002:
-                        if (!silient)
-                            Console.WriteLine("[Login]Login failed,Trying to create the account");
-                        await AccountCreation(data);
+                        ShowWarn("[Login]Login failed, Trying to create new account");
+                        await AccountCreation();
                         break;
                     default:
-                        if (!silient)
-                            Console.WriteLine("[Login]Login failed Unsure Code:" + Result);
+                        ShowError($"[Login]Login failed Unsure Code:{Result}");
                         break;
                 }
                 client.Close();
@@ -229,43 +220,107 @@ namespace HeadlessFFXI
                 switch (d.ErrorCode)
                 {
                     case 10061:
-                        if (!silient)
-                            Console.WriteLine("[Login]No responce from server");
+                        ShowError("[Login]No responce from server");
                         break;
                     default:
-                        if (!silient)
-                            Console.WriteLine("[Login]SocketError received:" + d.ErrorCode + ", " + d.Message);
+                        ShowError($"[Login]SocketError received:{d.ErrorCode}, {d.Message}");
                         break;
                 }
             }
             return false;
         }
-        async Task AccountCreation(byte[] data)
+        async Task AccountCreation()
         {
             TcpClient client = new TcpClient(loginserver, 54231);
-            NetworkStream stream = client.GetStream();
-            data[32] = 0x20;
-            await stream.WriteAsync(data, 0, 33);
-            byte[] indata = new Byte[1];
-            await stream.ReadAsync(indata, 0, 1);
-            switch (indata[0])
+
+            using var sslStream = new SslStream(
+            client.GetStream(),
+            leaveInnerStreamOpen: false,
+            userCertificateValidationCallback: (sender, certificate, chain, sslPolicyErrors) => true
+            );
+
+            var jsonData = new Dictionary<string, object>
+            {
+                ["username"] = Account_Data.Username,
+                ["password"] = Account_Data.Password,
+                ["otp"] = 0,
+                ["new_password"] = "",
+                ["version"] = new int[] { 2, 0, 0 },
+                ["command"] = 0x20
+            };
+
+            var options = new JsonSerializerOptions { WriteIndented = false };
+            string jsonString = JsonSerializer.Serialize(jsonData, options);
+
+            int jsonLen = Encoding.UTF8.GetByteCount(jsonString);
+            byte[] data = new byte[jsonLen];
+
+            Encoding.UTF8.GetBytes(jsonString, 0, jsonString.Length, data, 0);
+
+            var ssloptions = new SslClientAuthenticationOptions
+            {
+                TargetHost = loginserver,
+                EnabledSslProtocols = SslProtocols.Tls13,
+                CertificateRevocationCheckMode = X509RevocationMode.NoCheck
+            };
+
+            try
+            {
+                await sslStream.AuthenticateAsClientAsync(ssloptions);
+                ShowInfo($"[Login]Connected using {sslStream.SslProtocol}");
+            }
+            catch (Exception ex)
+            {
+                ShowError($"[Login]Handshake failed: {ex.GetType().Name} - {ex.Message}");
+                if (ex.InnerException != null)
+                    ShowError($"[Login]Inner: {ex.InnerException.GetType().Name} - {ex.InnerException.Message}");
+            }
+
+            await sslStream.WriteAsync(data, 0, jsonLen);
+            await sslStream.FlushAsync();
+
+            byte[] indata = new byte[8192];
+            int bytesRead = await sslStream.ReadAsync(indata.AsMemory(0, 8192));
+            sslStream.Close();
+
+            string rawResponse = Encoding.UTF8.GetString(indata, 0, bytesRead).Replace("'", "\"");
+            //Console.WriteLine(rawResponse);
+            Dictionary<string, JsonElement>? jsonInData = null;
+            try
+            {
+                jsonInData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(rawResponse);
+            }
+            catch (JsonException ex)
+            {
+                ShowError($"[Login]Invalid JSON: {ex.Message}");
+                throw;
+            }
+            catch (DecoderFallbackException ex)
+            {
+                ShowError($"[Login]UTF-8 decoding error: {ex.Message}");
+                throw;
+            }
+
+            if (jsonInData == null)
+                throw new InvalidDataException("Failed to parse login response.");
+            int Result = 0;
+            if (jsonInData.TryGetValue("result", out var resultElem))
+                Result = ((JsonElement)resultElem).GetInt32();
+
+            switch (Result)
             {
                 case 0x03: //Account creation success
-                    if (!silient)
-                        Console.WriteLine("[Login]New account created");
+                    ShowInfo("[Login]New account created");
                     Login();
                     break;
                 case 0x04: //Acount already exists
-                    if (!silient)
-                        Console.WriteLine("[Login]Account already exists, Check your username/password");
+                    ShowWarn("[Login]Account already exists, Check your username/password");
                     break;
                 case 0x08: //Account creation disabled
-                    if (!silient)
-                        Console.WriteLine("[Login]Account creation is disabled, If your account already exists check your username/password");
+                    ShowWarn("[Login]Account creation is disabled, If your account already exists check your username/password");
                     break;
                 case 0x09: //Acount creation error
-                    if (!silient)
-                        Console.WriteLine("[Login]Server failed to create a new account");
+                    ShowWarn("[Login]Server failed to create a new account");
                     break;
                 default:
                     break;
@@ -291,13 +346,13 @@ namespace HeadlessFFXI
             await lobbyview.ConnectAsync(loginserver, 54001);
             viewstream = lobbyview.GetStream();
 
-            Byte[] ver = System.Text.Encoding.ASCII.GetBytes("30250800_0");
-            Byte[] data = new byte[152];
+            byte[] ver = System.Text.Encoding.ASCII.GetBytes("30251000_0");
+            byte[] data = new byte[152];
             data[8] = 0x26;
             System.Buffer.BlockCopy(ver, 0, data, 116, 10);
             System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
             await viewstream.WriteAsync(data, 0, 152);
-            data = new Byte[40];
+            data = new byte[40];
             await viewstream.ReadAsync(data, 0, 40);
             //Console.WriteLine("[Info]Expantion Bitmask:{0:D}", BitConverter.ToUInt16(data, 32));
             //Console.WriteLine("[Info]Feature Bitmask:{0:D}", BitConverter.ToUInt16(data, 36));
@@ -305,7 +360,7 @@ namespace HeadlessFFXI
 
         async Task LobbyView0x1F()
         {
-            Byte[] data = new byte[44];
+            byte[] data = new byte[44];
             data[8] = 0x1F;
             System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
             await viewstream.WriteAsync(data, 0, 44);
@@ -314,7 +369,7 @@ namespace HeadlessFFXI
         //Request char list
         async Task LobbyData0xA1()
         {
-            Byte[] data = new Byte[28];
+            byte[] data = new byte[28];
             System.Buffer.BlockCopy(BitConverter.GetBytes(Account_Data.ID), 0, data, 1, 4);
             System.Buffer.BlockCopy(((System.Net.IPEndPoint)lobbydata.Client.RemoteEndPoint).Address.GetAddressBytes(), 0, data, 5, 4);
             data[0] = 0xA1;
@@ -337,8 +392,7 @@ namespace HeadlessFFXI
                 }
                 else
                 {
-                    if (!silient)
-                        Console.WriteLine("[Info]No charater in slot:{0:G} defaulting to slot 1", (Account_Data.Char_Slot + 1));
+                    ShowWarn($"[Login]No charater in slot:{Account_Data.Char_Slot + 1} defaulting to slot 1");
                     Account_Data.Char_Slot = 0;
                     Player_Data.ID = BitConverter.ToUInt32(data, 36);
                     string name = System.Text.Encoding.UTF8.GetString(data, 44, 16).TrimEnd('\0');
@@ -347,14 +401,12 @@ namespace HeadlessFFXI
                     Player_Data.Level = data[73 + 32];
                     Player_Data.zoneid = data[72 + 32];
                 }
-                if (!silient)
-                    Console.WriteLine("[Info]Name:{0:G} CharID:{1:D} Job:{2:D} Level:{3:D}", new object[] { Player_Data.Name, Player_Data.ID, Player_Data.Job, Player_Data.Level });
+                ShowInfo($"[Login]Name:{Player_Data.Name} CharID:{Player_Data.ID} Job:{Player_Data.Job} Level:{Player_Data.Level}");
             }
             else
             {
                 //Create a charater
-                if (!silient)
-                    Console.WriteLine("[Login]No charater's on account");
+                ShowWarn("[Login]No charater's on account");
                 LobbyView0x22();
             }
             /*
@@ -375,6 +427,7 @@ namespace HeadlessFFXI
         {
             byte[] data = new byte[48];
             data[8] = 0x22;
+            System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
             byte[] input = System.Text.Encoding.ASCII.GetBytes(Account_Data.Username.Length > 16 ? Account_Data.Username.Substring(0, 16) : Account_Data.Username);
             System.Buffer.BlockCopy(input, 0, data, 32, input.Length);
             viewstream.Write(data, 0, data.Length);
@@ -382,8 +435,7 @@ namespace HeadlessFFXI
             viewstream.Read(data, 0, data.Length);
             if (BitConverter.ToInt16(data, 32) == 313)
             {
-                if (!silient)
-                    Console.WriteLine("[Login]Name taken or invalid");
+                ShowError("[Login]Name taken or invalid");
             }
             else
             {
@@ -396,7 +448,8 @@ namespace HeadlessFFXI
         {
             byte[] data = new byte[64];
             data[8] = 0x21;
-            data[48] = 0; //Race
+            System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
+            data[48] = 1; //Race
             data[50] = 1; //Job
             data[54] = 2; //Nation
             data[57] = 1; //Size
@@ -406,15 +459,12 @@ namespace HeadlessFFXI
             viewstream.Read(data, 0, 64);
             if (data[0] == 0x20)
             {
-                if (!silient)
-                    Console.WriteLine("[Login]Char created");
+                ShowInfo("[Login]Char created");
                 LobbyView0x1F();
             }
             else
             {
-                if (!silient)
-                    Console.WriteLine("[Login]Failed to create a char exiting");
-                Exit();
+                ShowError("[Login]Failed to create a char exiting");
             }
         }
 
@@ -425,34 +475,33 @@ namespace HeadlessFFXI
             data[8] = 0x24;
             try
             {
-                Console.WriteLine("[Login]0x24 out");
+                ShowInfo("[Login]0x24 out");
                 viewstream.Write(data, 0, 44);
             }
             catch(Exception e)
             {
-                Console.WriteLine("[Login]0x24 Error in write");
+                ShowInfo("[Login]0x24 Error in write");
             }
             data = new byte[64];
             try
             {
-                Console.WriteLine("[Login]0x24 in1");
+                ShowInfo("[Login]0x24 in1");
                 int bytesreturned = await viewstream.ReadAsync(data, 0, 64);
-                Console.WriteLine("[Login]0x24 in2");
+                ShowInfo("[Login]0x24 in2");
             }
             catch (Exception e)
             {
-                Console.WriteLine("[Login]0x24 Error in read");
+                ShowError([Login]0x24 Error in read");
             }
-            if (!silient)
-                Console.WriteLine("[Info]{0:G} Server", System.Text.Encoding.UTF8.GetString(data, 36, 16));
+            ShowInfo("[Login]{0:G} Server", System.Text.Encoding.UTF8.GetString(data, 36, 16));
             */
         }
 
         async Task LobbyView0x07()
         {
-            Byte[] data = new byte[88];
+            byte[] data = new byte[88];
             data[8] = 0x07;
-            Byte[] id = BitConverter.GetBytes(Player_Data.ID);
+            byte[] id = BitConverter.GetBytes(Player_Data.ID);
             System.Buffer.BlockCopy(id, 0, data, 28, id.Length);
             System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Player_Data.Name), 0, data, 36, Player_Data.Name.Length);
             System.Buffer.BlockCopy(Account_Data.SessionHash, 0, data, 12, Account_Data.SessionHash.Length);
@@ -466,7 +515,7 @@ namespace HeadlessFFXI
             //Starting Key
             byte[] data = {
                 0xA2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0xE0, 0x5D, 0xAD, 0x00, //,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0xE0, 0x5D, 0xAD, 0x00,
                 0x00, 0x00, 0x00 };
             Thread.Sleep(2000);
             await datastream.WriteAsync(data, 0, 25);
@@ -480,8 +529,7 @@ namespace HeadlessFFXI
                 case 305:
                 case 321:
                 case 201:
-                    if (!silient)
-                        Console.WriteLine("[Login]Failed to pass us to the gameserver: " + error);
+                    ShowWarn("[Login]Failed to pass us to the gameserver: " + error);
                     return;
                 default:
                     Connected = true;
@@ -492,8 +540,7 @@ namespace HeadlessFFXI
             uint searchip = BitConverter.ToUInt32(data, 0x40);
             uint searchport = BitConverter.ToUInt16(data, 0x44);
             RemoteIpEndPoint = new IPEndPoint(zoneip, Convert.ToInt32(zoneport));
-            if (!silient)
-                Console.WriteLine("[Login]Handed off to gameserver " + RemoteIpEndPoint.Address + ":" + zoneport);
+            ShowInfo("[Login]Handed off to gameserver " + RemoteIpEndPoint.Address + ":" + zoneport);
             GameserverStart();
         }
         #endregion
@@ -520,8 +567,7 @@ namespace HeadlessFFXI
                 logoutPacket.SetSize(0x04);
                 Packetqueue.Enqueue(logoutPacket);
 
-                if (!silient)
-                    Console.WriteLine("[Game]Log Out sent");
+                ShowInfo("[Game]Log Out sent");
 
                 await Task.Delay(600); // Give packets time to send
             }
@@ -530,8 +576,6 @@ namespace HeadlessFFXI
 
             datastream?.Close();
             viewstream?.Close();
-
-            Exit();
         }
 
         async Task GameserverStart()
@@ -545,7 +589,7 @@ namespace HeadlessFFXI
             // Start the incoming packet parser
             _incomingTask = Task.Run(() => ParseIncomingPacket(_incCts.Token), _incCts.Token);
 
-            //Spellrepo = SpellLuaParser.ParseFile(@"D:\Windower\res\spells.lua");
+            Spellrepo = SpellLuaParser.ParseFile(@"D:\Windower\res\spells.lua");
 
             // Do initial zone login
             await Task.Run(() => Logintozone(true), _posCts.Token);
@@ -606,7 +650,7 @@ namespace HeadlessFFXI
                     ReadOnlySpan<byte> tail = receivedSpan.Slice(receivedSpan.Length - 16, 16);
                     if (!tail.SequenceEqual(tomd5))
                     {
-                        Console.WriteLine("[ParseIncoming] No md5 match keyhash:{0:G}", currentBlowfish.Key);
+                        ShowError($"[ParseIncoming]No md5 match keyhash:{currentBlowfish.Key}");
                     }
 
 
@@ -670,13 +714,11 @@ namespace HeadlessFFXI
                         index += packetLength;
                     }
                 }
-                catch (SocketException d)
+                catch (SocketException)
                 {
                     if (!ct.IsCancellationRequested)
                     {
-                        if (!silient)
-                            Console.WriteLine("[Game]Connection lost or refused, Exiting");
-                        Exit();
+                        ShowWarn("[ParseIncoming]Connection lost or refused, Exiting");
                     }
                     break;
                 }
@@ -694,7 +736,7 @@ namespace HeadlessFFXI
                     var frame = st.GetFrame(0);
                     // Get the line number from the stack frame
                     var line = frame.GetFileLineNumber();
-                    Console.WriteLine($"An unexpected error occurred: {ex.Message}" + ex.ToString() + frame.GetFileName);
+                    ShowError($"[ParseIncoming]An unexpected error occurred: {ex.Message} {ex} {frame.GetFileName()}");
                 }
             }
         }
@@ -710,8 +752,7 @@ namespace HeadlessFFXI
             // Check if we actually need to change servers
             bool needsNewConnection = !RemoteIpEndPoint.Equals(newEndpoint);
 
-            if (!silient)
-                Console.WriteLine($"[Game]Zone change requested to {ipAddress}:{port} (NewConnection: {needsNewConnection})");
+            ShowInfo($"[HandleZoneChange]Zone change requested to {ipAddress}:{port} (NewConnection: {needsNewConnection})");
 
             // Set zoning flag to prevent position updates from sending during transition
             Player_Data.zoning = true;
@@ -744,8 +785,7 @@ namespace HeadlessFFXI
 
             if (needsNewConnection)
             {
-                if (!silient)
-                    Console.WriteLine($"[Game]Changing zone server to {newEndpoint.Address}:{port}");
+                ShowInfo($"[HandleZoneChange]Changing zone server to {newEndpoint.Address}:{port}");
 
                 // Close old connection
                 Gameserver?.Close();
@@ -778,11 +818,6 @@ namespace HeadlessFFXI
 
                 // Start new game session with new cancellation token
                 _incomingTask = Task.Run(() => ParseIncomingPacket(_incCts.Token), _incCts.Token);
-            }
-            else
-            {
-                if (!silient)
-                    Console.WriteLine("[Game]Zone change on same server");
             }
 
             // Give the incoming task a moment to start listening
@@ -844,11 +879,8 @@ namespace HeadlessFFXI
                 }
             }
 
-            //if (!silient)
-            //    Console.WriteLine("[Info]Blowfish key:" + BitConverter.ToString(byteArray).Replace("-", " "));
-            if (!silient)
-                Console.WriteLine("[Info]Blowfish hash:" + BitConverter.ToString(hashkey).Replace("-", " "));
-
+            ShowInfo("[Logintozone]Blowfish key:" + BitConverter.ToString(byteArray).Replace("-", " "));
+            ShowInfo("[Logintozone]Blowfish hash:" + BitConverter.ToString(hashkey).Replace("-", " "));
 
             var shashkey = new sbyte[16];
             Buffer.BlockCopy(hashkey, 0, shashkey, 0, 16);
@@ -885,7 +917,7 @@ namespace HeadlessFFXI
             {
                 checksum += data[checksumOffset + i];
             }
-            //Console.WriteLine("Checksum: " + checksum);
+            //ShowInfo("Checksum: " + checksum);
 
             data[Packet_Head + 0x04] = checksum;
 
@@ -894,8 +926,7 @@ namespace HeadlessFFXI
             tomd5 = hasher.ComputeHash(tomd5);
             System.Buffer.BlockCopy(tomd5, 0, data, data.Length - 16, 16);
 
-            if (!silient)
-                Console.WriteLine("[Game]Outgoing packet 0x0A, Zone in");
+            ShowInfo("[Logintozone]Outgoing packet 0x0A, Zone in");
             try
             {
                 Thread.Sleep(2000);
@@ -909,10 +940,9 @@ namespace HeadlessFFXI
                     Gameserver.Send(data, data.Length);
                 }
             }
-            catch (SocketException d)
+            catch (SocketException)
             {
-                if (!silient)
-                    Console.WriteLine("[Game]Failed to connect retrying");
+                ShowWarn("[Logintozone]Failed to connect retrying");
                 startingkey[4] -= 2;
                 Logintozone(firstLogin);
             }
@@ -1004,8 +1034,6 @@ namespace HeadlessFFXI
             if (!learned)
                 return false;
 
-            return true;
-/* Regex on spell parsing is boinked fix later
             var spell = Spellrepo.GetById(spellId);
 
             var mjob = Player_Data.Job;
@@ -1017,7 +1045,6 @@ namespace HeadlessFFXI
                 return true;
 
             return false;
-*/
         }
         #endregion
         #region Movement
@@ -1041,9 +1068,6 @@ namespace HeadlessFFXI
         {
             var tellPacket = new P0B6Builder(User, Message);
             Packetqueue.Enqueue(tellPacket.Build());
-
-            if (!silient)
-                Console.WriteLine("Sending Tell");
         }
 
         public void SendPartyInvite(string User)
@@ -1058,7 +1082,7 @@ namespace HeadlessFFXI
             // Check if match is null
             if (match == null)
             {
-                Console.WriteLine($"Party invite target not found: {User}");
+                ShowWarn($"Party invite target not found: {User}");
                 return;
             }
 
@@ -1285,8 +1309,7 @@ namespace HeadlessFFXI
             zoneInPacket.SetSize(0x04);
             Packetqueue.Enqueue(zoneInPacket);
 
-            if (!silient)
-                Console.WriteLine("[Game]Outgoing packet 0x11, Zone in confirmation");
+            ShowInfo("[OutGoing_O11]Outgoing packet 0x11, Zone in confirmation");
 
             // Clear zoning flag
             Player_Data.zoning = false;
@@ -1303,7 +1326,7 @@ namespace HeadlessFFXI
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine("[Error] Outgoing task exception: " + ex);
+                        ShowError("[_positionTask] Outgoing task exception: " + ex);
                     }
 
                     try
@@ -1322,7 +1345,7 @@ namespace HeadlessFFXI
 
         void OutGoing_ZoneInData()
         {
-            Console.WriteLine("[Game]Sending Zone in data serverpacket:{0:G}", ServerPacketID);
+            ShowInfo($"[OutGoing_ZoneInData]Sending Zone in data serverpacket:{ServerPacketID}");
             if (chardata)
             {
 
@@ -1375,16 +1398,26 @@ namespace HeadlessFFXI
                 zoneInPacket6.SetSize(0x02);
                 Packetqueue.Enqueue(zoneInPacket6);
 
-                if (!silient)
-                    Console.WriteLine("[Game]Outgoing packet multi,Sending Post zone data requests");
+                ShowInfo("[OutGoing_ZoneInData]Outgoing packet multi,Sending Post zone data requests");
             }
         }
         #endregion
-        static void Exit()
-        {
-            System.Environment.Exit(1);
-        }
 
+        public void ShowInfo(string outstring)
+        {
+            if (LogLevel > 3)
+                Console.WriteLine($"[{Account_Data.Username}]{outstring}");
+        }
+        public void ShowWarn(string outstring)
+        {
+            if (LogLevel > 2)
+                Console.WriteLine($"[{Account_Data.Username}]{outstring}");
+        }
+        public void ShowError(string outstring)
+        {
+            if (LogLevel > 1)
+                Console.WriteLine($"[{Account_Data.Username}]{outstring}");
+        }
     }
 
     #region Structs

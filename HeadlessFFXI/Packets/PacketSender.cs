@@ -131,8 +131,6 @@ public class PacketSender : IDisposable
 
         input = BitConverter.GetBytes(finalsize);
         System.Buffer.BlockCopy(input, 0, data, data.Length - 20, input.Length);
-
-        // Console.WriteLine("Compressed 0x11 size {0:G}", finalsize);
     }
 
     public void packet_Encode(ref byte[] data)

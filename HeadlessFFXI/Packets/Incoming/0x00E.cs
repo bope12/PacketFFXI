@@ -44,7 +44,7 @@ public class P00EHandler : IPacketHandler
 
         if (updateFlags.HasFlag(SendFlags.Despawn))
         {
-            Console.WriteLine("Entity Despawn for ID:{0:G} Index:{1:G} Name:{2:G}", entityId, entityIndex, client.Entity_List[entityIndex].Name);
+            client.ShowInfo($"Entity Despawn for ID:{entityId} Index:{entityIndex} Name:{client.Entity_List[entityIndex].Name}");
             client.Entity_List[entityIndex] = new Entity();
         }
         else

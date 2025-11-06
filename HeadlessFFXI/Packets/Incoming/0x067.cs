@@ -41,7 +41,7 @@ public class P067Handler : IPacketHandler
             dataReader.Skip(0x02); // padding
             uint nameFlag = dataReader.ReadUInt32();
             string name = dataReader.ReadString(15); // do maths? or is this fixed lenght?
-            Console.WriteLine("0x067 Trust " + name);
+            client.ShowInfo("0x067 Trust " + name);
         }
          else if (mode == 0x04) // pet update
         {
@@ -53,7 +53,7 @@ public class P067Handler : IPacketHandler
             uint tp = dataReader.ReadUInt32();
             uint targetId = dataReader.ReadUInt32();
             string name = dataReader.ReadString(15); // do maths? or is this fixed lenght?
-            Console.WriteLine("0x067 Pet " + name);
+            client.ShowInfo("0x067 Pet " + name);
         }
     }
 }

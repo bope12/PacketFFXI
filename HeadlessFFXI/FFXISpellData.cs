@@ -12,7 +12,7 @@ namespace FFXISpellData
     public record SpellLevel(int JobId, int Level);
 
     /// <summary>
-    /// Represents a single spell from the FFXI spells.ula data
+    /// Represents a single spell from the FFXI spells.lua data
     /// </summary>
     public record Spell
     {
@@ -131,17 +131,13 @@ namespace FFXISpellData
         {
             var repository = new SpellRepository();
 
-            // Match all spell entries: [id] = {properties}
-            var spellPattern = @"\[(\d+)\]\s*=\s*\{([^}]+)\}";
-            var matches = Regex.Matches(luaContent, spellPattern);
+            // Find all spell entries by manually tracking braces
+            var entries = ExtractSpellEntries(luaContent);
 
-            foreach (Match match in matches)
+            foreach (var (id, properties) in entries)
             {
                 try
                 {
-                    var id = uint.Parse(match.Groups[1].Value);
-                    var properties = match.Groups[2].Value;
-
                     var spell = ParseSpell(id, properties);
                     if (spell != null)
                     {
@@ -150,11 +146,48 @@ namespace FFXISpellData
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error parsing spell: {ex.Message}");
+                    Console.WriteLine($"Error parsing spell {id}: {ex.Message}");
                 }
             }
 
             return repository;
+        }
+
+        /// <summary>
+        /// Extracts spell entries handling nested braces correctly
+        /// </summary>
+        private static List<(uint id, string properties)> ExtractSpellEntries(string luaContent)
+        {
+            var entries = new List<(uint, string)>();
+            var idPattern = @"\[(\d+)\]\s*=\s*\{";
+            var matches = Regex.Matches(luaContent, idPattern);
+
+            foreach (Match match in matches)
+            {
+                var id = uint.Parse(match.Groups[1].Value);
+                var startIndex = match.Index + match.Length;
+
+                // Find matching closing brace by counting nested braces
+                var braceCount = 1;
+                var endIndex = startIndex;
+
+                while (endIndex < luaContent.Length && braceCount > 0)
+                {
+                    if (luaContent[endIndex] == '{')
+                        braceCount++;
+                    else if (luaContent[endIndex] == '}')
+                        braceCount--;
+                    endIndex++;
+                }
+
+                if (braceCount == 0)
+                {
+                    var properties = luaContent.Substring(startIndex, endIndex - startIndex - 1);
+                    entries.Add((id, properties));
+                }
+            }
+
+            return entries;
         }
 
         private static Spell? ParseSpell(uint id, string properties)
@@ -211,21 +244,18 @@ namespace FFXISpellData
 
         private static Dictionary<int, int> ExtractLevels(string properties)
         {
-            Console.WriteLine(properties);
             var levels = new Dictionary<int, int>();
-            var levelsMatch = Regex.Match(properties, @"levels=\{(.*?)\}");
+            var levelsMatch = Regex.Match(properties, @"levels=\{([^}]+)\}");
 
             if (levelsMatch.Success)
             {
-                Console.WriteLine("levels");
                 var levelsContent = levelsMatch.Groups[1].Value;
-                var levelMatches = Regex.Matches(properties, @"\[(\d+)\]\s*=\s*(\d+)");
+                var levelMatches = Regex.Matches(levelsContent, @"\[(\d+)\]=(\d+)");
 
                 foreach (Match levelMatch in levelMatches)
                 {
                     var jobId = int.Parse(levelMatch.Groups[1].Value);
                     var level = int.Parse(levelMatch.Groups[2].Value);
-                    Console.WriteLine("{0:G} {1:G}",jobId, level);
                     levels[jobId] = level;
                 }
             }

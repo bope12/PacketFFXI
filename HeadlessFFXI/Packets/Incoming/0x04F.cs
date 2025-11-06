@@ -11,6 +11,6 @@ public class P04FHandler : IPacketHandler
     public void Handle(Client client, ReadOnlySpan<byte> data)
     {
         client.Player_Data.Equip = new Equipment[16];
-        //Console.WriteLine("[0x04F] Equipment cleared.");
+        //client.ShowInfo("[0x04F] Equipment cleared.");
     }
 }

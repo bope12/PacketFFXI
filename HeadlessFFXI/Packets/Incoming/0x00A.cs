@@ -48,8 +48,7 @@ public class P00AHandler : IPacketHandler
         }
         else
         {
-            if (!client.silient)
-                Console.WriteLine("[Parse]Incorect size in incoming 00A Packet Expected {0:X} Got {1:X}", ExpectedSize, data.Length);
+            client.ShowWarn($"[P00AHandler]Incorect size in incoming 00A Packet Expected {ExpectedSize} Got {data.Length}");
         }
 
         Task.Run(() => client.OutGoing_O11()); // Send Zone in confirmation

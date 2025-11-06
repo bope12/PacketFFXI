@@ -10,7 +10,7 @@ public class P058Handler : IPacketHandler
 
     public void Handle(Client client, ReadOnlySpan<byte> data)
     {
-        Console.WriteLine(data.Length.ToString());
+        client.ShowInfo(data.Length.ToString());
         var dataReader = new PacketReader(data);
         dataReader.Skip(4); // Skip header
 

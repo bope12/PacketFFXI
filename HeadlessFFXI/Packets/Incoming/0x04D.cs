@@ -16,8 +16,8 @@ public class P04DHandler : IPacketHandler
         if (handlerType == 0x01 || handlerType == 0x02) // 0x01 = Server Message
         {
             uint length = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(0x14, 4));
-            if (!client.silient)
-                Console.WriteLine("[SMES]" + System.Text.Encoding.UTF8.GetString(data.Slice(0x18, (int)length)).TrimEnd('\0'));
+
+            client.ShowInfo("[SMES]" + System.Text.Encoding.UTF8.GetString(data.Slice(0x18, (int)length)).TrimEnd('\0'));
         }
     }
 }
