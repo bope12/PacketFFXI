@@ -16,6 +16,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using FFXISpellData;
+using System.Text.Json;
 
 namespace HeadlessFFXI
 {
@@ -99,24 +100,29 @@ namespace HeadlessFFXI
                 userCertificateValidationCallback: (sender, certificate, chain, sslPolicyErrors) => true // ⚠️ Only for testing!
                 );
 
-                Byte[] data = new Byte[102];
-                data[0x00] = 0xFF;
-                data[0x01] = 0;
-                data[0x02] = 0;
-                data[0x03] = 0;
-                data[0x04] = 0;
-                data[0x05] = 0;
-                data[0x06] = 0;
-                data[0x07] = 0;
-                data[0x08] = 0;
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Username), 0, data, 0x09, Account_Data.Username.Length);
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Password), 0, data, 0x19, Account_Data.Password.Length);
+                var jsonData = new Dictionary<string, object>
+                {
+                    ["username"] = Account_Data.Username,
+                    ["password"] = Account_Data.Password,
+                    ["otp"] = 0,
+                    ["new_password"] = "",
+                    ["version"] = new int[] { 2, 0, 0 },
+                    ["command"] = 0x10
+                };
 
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes(Account_Data.Password), 0, data, 0x30, Account_Data.Password.Length);
-                data[0x39] = 0x10;
+                // Serialize to JSON string
+                var options = new JsonSerializerOptions { WriteIndented = false };
+                string jsonString = JsonSerializer.Serialize(jsonData, options);
 
-                System.Buffer.BlockCopy(System.Text.Encoding.ASCII.GetBytes("1.1.1"), 0, data, 0x61, 5);
-                var options = new SslClientAuthenticationOptions
+                // Get byte length (UTF-8) and copy into a new byte[] (equivalent to your bytearray + memcpy)
+                int jsonLen = Encoding.UTF8.GetByteCount(jsonString);
+                byte[] data = new byte[jsonLen];
+
+                // Fill the data buffer with the UTF-8 bytes of the JSON string
+                // This matches exactly creating a zero-length byte array and memcpy'ing the string bytes into it
+                Encoding.UTF8.GetBytes(jsonString, 0, jsonString.Length, data, 0);
+
+                var ssloptions = new SslClientAuthenticationOptions
                 {
                     TargetHost = loginserver,
                     EnabledSslProtocols = SslProtocols.Tls13, // <-- This is the key line
@@ -125,7 +131,7 @@ namespace HeadlessFFXI
 
                 try
                 {
-                    await sslStream.AuthenticateAsClientAsync(options);
+                    await sslStream.AuthenticateAsClientAsync(ssloptions);
                     Console.WriteLine($"Connected using {sslStream.SslProtocol}");
                 }
                 catch (Exception ex)
@@ -135,22 +141,61 @@ namespace HeadlessFFXI
                         Console.WriteLine($"Inner: {ex.InnerException.GetType().Name} - {ex.InnerException.Message}");
                 }
 
-                await sslStream.WriteAsync(data, 0, 102);
+                await sslStream.WriteAsync(data, 0, jsonLen);
                 await sslStream.FlushAsync();
 
-                byte[] indata = new Byte[21];
-                int bytesRead = await sslStream.ReadAsync(indata.AsMemory(0, 21));
+                byte[] indata = new byte[8192];
+                int bytesRead = await sslStream.ReadAsync(indata.AsMemory(0, 8192));
                 sslStream.Close();
 
-                switch (indata[0])
+                string rawResponse = Encoding.UTF8.GetString(indata, 0, bytesRead).Replace("'", "\"");
+                Console.WriteLine(rawResponse);
+                Dictionary<string, JsonElement>? jsonInData = null;
+                try
+                {
+                    jsonInData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(rawResponse);
+                }
+                catch (JsonException ex)
+                {
+                    Console.WriteLine($"[WARN] Invalid JSON: {ex.Message}");
+                    throw;
+                }
+                catch (DecoderFallbackException ex)
+                {
+                    Console.WriteLine($"[WARN] UTF-8 decoding error: {ex.Message}");
+                    throw;
+                }
+
+                if (jsonInData == null)
+                    throw new InvalidDataException("Failed to parse login response.");
+                int Result = 0;
+                int AccountId = 0;
+                byte[] SessionHash = new byte[1];
+                // Extract fields safely
+                if (jsonInData.TryGetValue("result", out var resultElem))
+                    Result = ((JsonElement)resultElem).GetInt32();
+
+                if (jsonInData.TryGetValue("account_id", out var accountElem))
+                    AccountId = ((JsonElement)accountElem).GetInt32();
+
+                if (jsonInData.TryGetValue("session_hash", out var sessionElem))
+                {
+                    List<byte> temp = new List<byte>();
+                    foreach (var item in ((JsonElement)sessionElem).EnumerateArray())
+                    {
+                        temp.Add(((JsonElement)item).GetByte());
+                    }
+                    SessionHash = temp.ToArray();
+                }
+
+                switch (Result)
                 {
                     case 0x0001: //Login Success
                         //Console.WriteLine("[Login]Logged In");
-                        Account_Data.ID = BitConverter.ToUInt32(indata, 1);
+                        Account_Data.ID = (uint)AccountId;
                         if (!silient)
                             Console.WriteLine("[Info]Account id:{0:D}", Account_Data.ID);
-                        Account_Data.SessionHash = new byte[16];
-                        System.Buffer.BlockCopy(indata, 5, Account_Data.SessionHash, 0, 16);
+                        Account_Data.SessionHash = SessionHash;
                         lobbydata = new TcpClient(AddressFamily.InterNetwork);
                         await lobbydata.ConnectAsync(loginserver, 54230);
                         datastream = lobbydata.GetStream();
@@ -174,7 +219,7 @@ namespace HeadlessFFXI
                         break;
                     default:
                         if (!silient)
-                            Console.WriteLine("[Login]Login failed Unsure Code:" + indata[0]);
+                            Console.WriteLine("[Login]Login failed Unsure Code:" + Result);
                         break;
                 }
                 client.Close();
