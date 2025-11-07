@@ -1,3 +1,5 @@
+using System;
+
 namespace HeadlessFFXI.Networking.Packets
 {
     public class P0E8Builder : IPacketBuilder
@@ -6,9 +8,9 @@ namespace HeadlessFFXI.Networking.Packets
         public ushort Size => 0x04;
         public uint Mode;
 
-        public P0E8Builder(uint mode)
+        public P0E8Builder(HealMode mode)
         {
-            Mode = mode;
+            Mode = (uint)mode;
         }
 
         public OutgoingPacket Build()
@@ -22,11 +24,11 @@ namespace HeadlessFFXI.Networking.Packets
 
             return packet;
         }
-        enum HealMode =
-        {
-            Toggle = 0x00,
-            On = 0x01,
-            Off = 0x02
-        }
+    }
+    public enum HealMode
+    {
+        Toggle = 0x00,
+        On = 0x01,
+        Off = 0x02
     }
 }

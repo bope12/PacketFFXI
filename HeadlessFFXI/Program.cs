@@ -1,8 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using HeadlessFFXI.Networking.Packets;
+using PathFinder.Common;
 using static HeadlessFFXI.Client;
 
 namespace HeadlessFFXI
@@ -82,10 +87,22 @@ namespace HeadlessFFXI
                 settings.password = Console.ReadLine();
             }
             #endregion
-            User = new Client(settings, true, false);
+            User = new Client(settings, true, 4);
             await User.Login();
             User.IncomingChat += YourObject_IncomingChat;
             User.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+
+            //Thread.Sleep(4000);
+            //var config = new Config();
+            //config.user = "hjhjhjhjhj";
+            //config.password = "jhjhjhjh";
+            //config.server = "127.0.0.1";
+            //config.char_slot = 0;
+            //var user2 = new Client(config, true, 4);
+            //await user2.Login();
+            //user2.IncomingChat += YourObject_IncomingChat;
+            //user2.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+
             Thread.Sleep(2000000);
             await Exit();
             return;
@@ -119,16 +136,28 @@ namespace HeadlessFFXI
                 client.CastMagic(1024, cure.Id);
                 Console.WriteLine(client.CanUseSpell(1).ToString() + " " + client.CanUseSpell(128).ToString());
             }
+            else if (e.Message.ToLower().Contains("heal"))
+                client.Heal(HealMode.Toggle);
+            else if (e.Message.ToLower().Contains("move"))
+            {
+                var pos1 = new position_t();
+                pos1.X = 61.3066F;
+                pos1.Y = 0.7218f;
+                pos1.Z = -50.5319f;
+                client.MoveTo(pos1);
+            }
             else
                 client.SendTell(e.Name, e.Message);
             // Do whatever you need with the data
+        }
+        private static double GetDistance(float x1, float y1, float x2, float y2)
+        {
+            return Math.Sqrt(Math.Pow((x2 - x1), 2) + Math.Pow((y2 - y1), 2));
         }
         private static void YourObject_IncomingPartyInvite(object sender, IncomingPartyInviteEventArgs e)
         {
             var client = (Client)sender;
             client.PartyInviteResponce(true);
         }
-
-
     }
 }

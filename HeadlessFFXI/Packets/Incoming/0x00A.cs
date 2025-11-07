@@ -3,6 +3,8 @@
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x00a_login.cpp
 using System;
 using System.Buffers.Binary;
+using System.IO;
+using System.Reflection;
 using System.Threading.Tasks;
 using HeadlessFFXI;
 
@@ -20,11 +22,11 @@ public class P00AHandler : IPacketHandler
             client.Player_Data.ID = dataReader.ReadUInt32();
             client.Player_Data.Index = dataReader.ReadUInt16();
             dataReader.Skip(1); //skip some unk bytes
-            client.Player_Data.pos.Rot = dataReader.ReadByte();
+            client.Player_Data.pos.Rotation = (sbyte)dataReader.ReadByte();
             client.Player_Data.pos.X = dataReader.ReadFloat();
             client.Player_Data.pos.Y = dataReader.ReadFloat();
             client.Player_Data.pos.Z = dataReader.ReadFloat();
-            client.Player_Data.pos.moving = 0;
+            client.Player_Data.pos.Moving = 0;
             client.Player_Data.Job = data[0xB4];
             client.Player_Data.SubJob = data[0xB7];
             client.Player_Data.MaxHP = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(0xE8, 4));
@@ -45,6 +47,16 @@ public class P00AHandler : IPacketHandler
             client.Player_Data.zone.Music_BG_Night = data[0x58];
             client.Player_Data.zone.Music_Battle_Solo = data[0x5A];
             client.Player_Data.zone.Music_Battle_Party = data[0x5C];
+
+            client.Nav.Unload();
+            var NavFile = string.Format(System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "\\Dumped NavMeshes\\{0}.nav", client.Player_Data.zone.ID);
+            if (File.Exists(NavFile))
+            {
+                client.Nav.Initialize(100);
+                client.Nav.Load(NavFile);
+            }
+            else
+                client.ShowWarn($"Unable to load NavMesh for current Zone");
         }
         else
         {

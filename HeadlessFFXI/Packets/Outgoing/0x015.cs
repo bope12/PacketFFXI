@@ -25,16 +25,16 @@ namespace HeadlessFFXI.Networking.Packets
             // Movement tracking
             if (_Player.pos.HasChanged(_Player.oldpos))
             {
-                _Player.pos.moving = (ushort)(_Player.pos.moving + 7);
+                _Player.pos.Moving = (ushort)(_Player.pos.Moving + 7);
                 _Player.oldpos = _Player.pos;
             }
             else
             {
-                _Player.pos.moving = 0;
+                _Player.pos.Moving = 0;
             }
 
-            BitConverter.GetBytes(_Player.pos.moving).CopyTo(data, 0x12);
-            data[0x14] = _Player.pos.Rot;
+            BitConverter.GetBytes(_Player.pos.Moving).CopyTo(data, 0x12);
+            data[0x14] = (byte)_Player.pos.Rotation;
 
             var packet = new OutgoingPacket(data);
             packet.SetType(Type);

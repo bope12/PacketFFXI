@@ -56,10 +56,10 @@ public class P00DHandler : IPacketHandler
             client.Entity_List[charIndex].Pos.Z = y;
             client.Entity_List[charIndex].TargetIndex = flags0.FaceTarget;
 
-            client.Player_Data.pos.Rot = dir;
-            client.Player_Data.pos.X = x;
-            client.Player_Data.pos.Y = z;
-            client.Player_Data.pos.Z = y;
+            //client.Player_Data.pos.Rot = dir;
+            //client.Player_Data.pos.X = x;
+            //client.Player_Data.pos.Y = z;
+            //client.Player_Data.pos.Z = y;
             //Player_Data.pos.moving = flags0.MovTime;
         }
         if (updateFlags.HasFlag(SendFlags.General))

@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using FFXISpellData;
 using System.Text.Json;
+using PathFinder.Common;
 
 namespace HeadlessFFXI
 {
@@ -72,6 +73,7 @@ namespace HeadlessFFXI
         private Task _incomingTask;
         private Task _positionTask;
         public SpellRepository Spellrepo;
+        public FFXINAV Nav;
         #endregion
         #region Loginproccess
         public Client(Config cfg, bool Full = true, byte log = 4)
@@ -551,10 +553,8 @@ namespace HeadlessFFXI
             {
                 byte[] data = new byte[8];
 
-                OutgoingPacket logoutPacket2 = new OutgoingPacket(data);
-                logoutPacket2.SetType(0x0D);
-                logoutPacket2.SetSize(0x04);
-                Packetqueue.Enqueue(logoutPacket2);
+                var packet = new P00DBuilder();
+                Packetqueue.Enqueue(packet.Build());
 
                 await Task.Delay(600); // Give packets time to send
 
@@ -590,6 +590,7 @@ namespace HeadlessFFXI
             _incomingTask = Task.Run(() => ParseIncomingPacket(_incCts.Token), _incCts.Token);
 
             Spellrepo = SpellLuaParser.ParseFile(@"D:\Windower\res\spells.lua");
+            Nav = new FFXINAV();
 
             // Do initial zone login
             await Task.Run(() => Logintozone(true), _posCts.Token);
@@ -1046,8 +1047,65 @@ namespace HeadlessFFXI
 
             return false;
         }
+
+        public void Heal(HealMode mode)
+        {
+            var packet = new P0E8Builder(mode);
+            Packetqueue.Enqueue(packet.Build());
+        }
         #endregion
         #region Movement
+        public void MoveTo(position_t pos)
+        {
+            Nav.FindPathToPosi(Player_Data.pos, pos, false);
+            Nav.GetWaypoints();
+            var queue = new Queue<position_t>(Nav.Waypoints);
+            float MAX_STEP_DISTANCE = 1.0f; // Adjust this value based on what clients expect
+            float ARRIVAL_THRESHOLD = 1.0f; // How close is "close enough"
+            Task.Run(async () =>
+            {
+                while (queue.Count > 0)
+                {
+                    Console.WriteLine(queue.Count.ToString());
+                    var targetPoint = queue.Dequeue();
+
+                    // Keep moving towards the target point until we reach it
+                    while (true)
+                    {
+                        // Calculate 3D distance
+                        float deltaX = targetPoint.X - Player_Data.pos.X;
+                        float deltaY = targetPoint.Y - Player_Data.pos.Y;
+                        float deltaZ = targetPoint.Z - Player_Data.pos.Z;
+                        float distance = (float)Math.Sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+
+                        if (distance <= ARRIVAL_THRESHOLD) // Close enough, we've arrived
+                        {
+                            break;
+                        }
+
+                        //Console.WriteLine("{0:G} {1:G} {2:G} {3:G}", targetPoint.X, targetPoint.Y, targetPoint.Z, distance);
+
+                        // Update rotation to face the target
+                        Player_Data.pos.Rotation = Nav.Getrotation(Player_Data.pos, targetPoint);
+
+                        // Determine how far to move this step
+                        float stepDistance = Math.Min(distance, MAX_STEP_DISTANCE);
+
+                        // Calculate movement ratio
+                        float ratio = stepDistance / distance;
+
+                        // Move towards the target
+                        Player_Data.pos.X += deltaX * ratio;
+                        Player_Data.pos.Y += deltaY * ratio;
+                        Player_Data.pos.Z += deltaZ * ratio;
+
+                        Thread.Sleep(205);
+                    }
+
+                    Thread.Sleep(50);
+                }
+            });
+        }
         public void Mount(uint mountId)
         {
             var parms = new uint[4];
@@ -1432,8 +1490,8 @@ namespace HeadlessFFXI
         public byte SubLevel = 37;
         public byte zoneid;
         public Zone_Info zone;
-        public Position pos;
-        public Position oldpos;
+        public position_t pos;
+        public position_t oldpos;
         public uint HP;
         public uint MP;
         public uint TP;
@@ -1472,9 +1530,8 @@ namespace HeadlessFFXI
         public float X;
         public float Y;
         public float Z;
-        public byte Rot;
-
         public ushort moving;
+        public byte Rot;
 
         public readonly bool HasChanged(Position other, float tolerance = 0.01f)
         {

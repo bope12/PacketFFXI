@@ -1,3 +1,5 @@
+using System;
+
 namespace HeadlessFFXI.Networking.Packets
 {
     public class P0EABuilder : IPacketBuilder
@@ -22,11 +24,11 @@ namespace HeadlessFFXI.Networking.Packets
 
             return packet;
         }
-        enum SitMode =
-        {
-            Toggle = 0x00,
-            On = 0x01,
-            Off = 0x02
-        }
+    }
+    public enum SitMode
+    {
+        Toggle = 0x00,
+        On = 0x01,
+        Off = 0x02
     }
 }

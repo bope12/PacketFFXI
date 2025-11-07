@@ -26,7 +26,7 @@ public class P05BHandler : IPacketHandler
             client.Player_Data.pos.X = x;
             client.Player_Data.pos.Y = y;
             client.Player_Data.pos.Z = z;
-            client.Player_Data.pos.Rot = dir;
+            client.Player_Data.pos.Rotation = (sbyte)dir;
             client.Player_Data.Index = actIndex;
         }
 

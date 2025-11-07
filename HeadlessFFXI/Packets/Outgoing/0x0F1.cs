@@ -1,3 +1,5 @@
+using System;
+
 namespace HeadlessFFXI.Networking.Packets
 {
     public class P0F1Builder : IPacketBuilder
