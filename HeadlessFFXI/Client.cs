@@ -52,7 +52,7 @@ namespace HeadlessFFXI
         AccountInfo Account_Data;
         public My_Player Player_Data;
         public Entity[] Entity_List = new Entity[4096];
-        Zlib myzlib;
+        private readonly Zlib _zlib = new Zlib();
         OutgoingQueue Packetqueue = new OutgoingQueue();
         PacketSender Packetsender;
         string loginserver = "127.0.0.1";
@@ -68,7 +68,7 @@ namespace HeadlessFFXI
         public event EventHandler<IncomingPartyInviteEventArgs> IncomingPartyInvite;
         public bool Connected = false;
         private readonly PacketHandlerRegistry _registry = new();
-        static MD5 hasher = System.Security.Cryptography.MD5.Create();
+        private readonly MD5 _hasher = MD5.Create();
         private CancellationTokenSource _posCts;
         private CancellationTokenSource _incCts;
         private Task _incomingTask;
@@ -88,9 +88,7 @@ namespace HeadlessFFXI
         }
         public async Task<bool> Login()
         {
-            Console.SetOut(new TimestampTextWriter(Console.Out));
-            myzlib = new Zlib();
-            myzlib.Init();
+            _zlib.Init();
             try
             {
                 //AppContext.SetSwitch("System.Net.Security.UseNetworkFramework", true);
@@ -199,7 +197,6 @@ namespace HeadlessFFXI
                         dataByte[0] = 0xFE;
                         System.Buffer.BlockCopy(Account_Data.SessionHash, 0, dataByte, 12, Account_Data.SessionHash.Length);
                         await datastream.WriteAsync(dataByte, 0, dataByte.Length);
-
                         await LobbyDataA1();
                         await LobbyView0x26();
                         await LobbyView0x1F();
@@ -581,7 +578,13 @@ namespace HeadlessFFXI
 
         async Task GameserverStart()
         {
-            Gameserver = new UdpClient();
+            var localEp = new IPEndPoint(IPAddress.Any, 0); // OS assigns port
+            Gameserver = new UdpClient(localEp);
+            Gameserver.Client.SetSocketOption(
+                SocketOptionLevel.Socket,
+                SocketOptionName.ReuseAddress,
+                true
+            );
             Gameserver.Connect(RemoteIpEndPoint);
 
             // Create new cancellation token for this game session
@@ -645,7 +648,7 @@ namespace HeadlessFFXI
                     //}
                     byte[] tomd5 = new byte[receiveBytes.Length - Packet_Head - 16];
                     System.Buffer.BlockCopy(receiveBytes, Packet_Head, tomd5, 0, tomd5.Length);
-                    tomd5 = hasher.ComputeHash(tomd5);
+                    tomd5 = _hasher.ComputeHash(tomd5);
 
                     ReadOnlySpan<byte> receivedSpan = receiveBytes;
                     ReadOnlySpan<byte> tail = receivedSpan.Slice(receivedSpan.Length - 16, 16);
@@ -662,7 +665,7 @@ namespace HeadlessFFXI
                     System.Buffer.BlockCopy(receiveBytes, Packet_Head + 1, buffer, 0, buffer.Length);
                     //Console.WriteLine("ToDelib:   " + BitConverter.ToString(buffer).Replace("-", " "));
                     int w = 0;
-                    uint pos = myzlib.jump[0];
+                    uint pos = _zlib.jump[0];
                     var outbuf = ArrayPool<byte>.Shared.Rent(4000);
                     try
                     {
@@ -670,17 +673,17 @@ namespace HeadlessFFXI
                         for (int i = 0; i < packetsize && w < 4000; i++)
                         {
                             int s = (buffer[i / 8] >> (i & 7)) & 1;
-                            pos = myzlib.jump[pos + s];
+                            pos = _zlib.jump[pos + s];
                             //Console.WriteLine("{0:G} : {1:G}  0,1 {2:G},{3:G}", s, pos, myzlib.jump[pos], myzlib.jump[pos+1]);
-                            if (myzlib.jump[pos] != 0 || myzlib.jump[pos + 1] != 0)
+                            if (_zlib.jump[pos] != 0 || _zlib.jump[pos + 1] != 0)
                             {
                                 //Console.WriteLine("Pos:{0:G} not both zero", pos);
                                 continue;
                             }
                             //Console.WriteLine("DATA:{0:G}", myzlib.jump[pos + 3]);
-                            outbuf[w++] = BitConverter.GetBytes(myzlib.jump[pos + 3])[0];
+                            outbuf[w++] = BitConverter.GetBytes(_zlib.jump[pos + 3])[0];
                             //Console.WriteLine(BitConverter.GetBytes(myzlib.jump[pos + 3])[0]);
-                            pos = myzlib.jump[0];
+                            pos = _zlib.jump[0];
                         }
                         byte[] final = new byte[w];
                         System.Buffer.BlockCopy(outbuf, 0, final, 0, w);
@@ -882,7 +885,7 @@ namespace HeadlessFFXI
 
             byte[] byteArray = new byte[startingkey.Length * sizeof(uint)];
             Buffer.BlockCopy(startingkey, 0, byteArray, 0, byteArray.Length);
-            byte[] hashkey = hasher.ComputeHash(byteArray, 0, 20);
+            byte[] hashkey = _hasher.ComputeHash(byteArray, 0, 20);
 
             for (int i = 0; i < 16; ++i)
             {
@@ -908,7 +911,7 @@ namespace HeadlessFFXI
             if (Packetsender != null)
                 Packetsender.UpdateBlowfish(CurrentBlowfish);
 
-            Packetsender = new PacketSender(Packetqueue, Gameserver, CurrentBlowfish, myzlib);
+            Packetsender = new PacketSender(Packetqueue, Gameserver, CurrentBlowfish, _zlib);
 
             // Let this send its own packet as it does not follow the normal packet rules
             #region ZoneInpackets
@@ -940,7 +943,7 @@ namespace HeadlessFFXI
 
             byte[] tomd5 = new byte[data.Length - (Packet_Head + 16)];
             System.Buffer.BlockCopy(data, Packet_Head, tomd5, 0, tomd5.Length);
-            tomd5 = hasher.ComputeHash(tomd5);
+            tomd5 = _hasher.ComputeHash(tomd5);
             System.Buffer.BlockCopy(tomd5, 0, data, data.Length - 16, 16);
 
             ShowInfo("[Logintozone]Outgoing packet 0x0A, Zone in");
@@ -1623,21 +1626,4 @@ namespace HeadlessFFXI
     //0-1023 Mobs/NPCS/Ships
     //1024-1791 Players
     //1792-4095 Dynamic Pets/Trust/DE Npc/DE Mobs
-}
-
-public class TimestampTextWriter : TextWriter
-{
-    private readonly TextWriter _originalOut;
-    public override Encoding Encoding => _originalOut.Encoding;
-
-    public TimestampTextWriter(TextWriter originalOut)
-    {
-        _originalOut = originalOut;
-    }
-
-    public override void WriteLine(string value)
-    {
-        string timestamp = $"[{DateTime.Now:HH:mm:ss.fff}] ";
-        _originalOut.WriteLine(timestamp + value);
-    }
 }

@@ -19,7 +19,7 @@ public class PacketSender : IDisposable
     private ushort _serverPacketId = 1; // last received from server
 
     private const int PacketHead = 28; // whatever fixed header you start with
-    static MD5 hasher = System.Security.Cryptography.MD5.Create();
+    private readonly MD5 _hasher = MD5.Create();
     private readonly Zlib _zlib;
     private Blowfish _blowfish;
     private bool _disposed = false;
@@ -138,6 +138,8 @@ public class PacketSender : IDisposable
         //Lets encipher this packet
         int CypherSize = (int)((data.Length / 4) & ~1); // same as & -2
 
+        Span<byte> dataSpan = data;
+
         for (int j = 0; j < CypherSize; j += 2)
         {
             int offset1 = (int)(4 * (j + 7));
@@ -148,22 +150,22 @@ public class PacketSender : IDisposable
                 break;
 
             // Read two 32-bit words from buff
-            uint xl = BitConverter.ToUInt32(data, offset1);
-            uint xr = BitConverter.ToUInt32(data, offset2);
+            uint xl = BinaryPrimitives.ReadUInt32LittleEndian(dataSpan.Slice(offset1, 4));
+            uint xr = BinaryPrimitives.ReadUInt32LittleEndian(dataSpan.Slice(offset2, 4));
 
             // Encrypt the pair
             _blowfish.Blowfish_encipher(ref xl, ref xr);
 
             // Write them back into the buffer
-            Array.Copy(BitConverter.GetBytes(xl), 0, data, offset1, 4);
-            Array.Copy(BitConverter.GetBytes(xr), 0, data, offset2, 4);
+            BinaryPrimitives.WriteUInt32LittleEndian(dataSpan.Slice(offset1, 4), xl);
+            BinaryPrimitives.WriteUInt32LittleEndian(dataSpan.Slice(offset2, 4), xr);
         }
     }
     public void packet_addmd5(ref byte[] data)
     {
         byte[] tomd5 = new byte[data.Length - (PacketHead + 16)];
         System.Buffer.BlockCopy(data, PacketHead, tomd5, 0, tomd5.Length);
-        tomd5 = hasher.ComputeHash(tomd5);
+        tomd5 = _hasher.ComputeHash(tomd5);
         System.Buffer.BlockCopy(tomd5, 0, data, data.Length - 16, 16);
     }
     #endregion

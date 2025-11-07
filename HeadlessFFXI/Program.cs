@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.IO;
-using System.Linq;
-using System.Net;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using HeadlessFFXI.Networking.Packets;
@@ -18,6 +15,7 @@ namespace HeadlessFFXI
         static async Task Main(string[] args)
         {
             #region Settings
+            Console.SetOut(new TimestampTextWriter(Console.Out));
             Config settings = new Config();
             settings.server = "127.0.0.1";
             if (args.Length == 6 || args.Length == 8)
@@ -92,16 +90,16 @@ namespace HeadlessFFXI
             User.IncomingChat += YourObject_IncomingChat;
             User.IncomingPartyInvite += YourObject_IncomingPartyInvite;
 
-            //Thread.Sleep(4000);
-            //var config = new Config();
-            //config.user = "hjhjhjhjhj";
-            //config.password = "jhjhjhjh";
-            //config.server = "127.0.0.1";
-            //config.char_slot = 0;
-            //var user2 = new Client(config, true, 4);
-            //await user2.Login();
-            //user2.IncomingChat += YourObject_IncomingChat;
-            //user2.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+            Thread.Sleep(4000);
+            var config = new Config();
+            config.user = "hjhjhjhjhj";
+            config.password = "jhjhjhjh";
+            config.server = "127.0.0.1";
+            config.char_slot = 0;
+            var user2 = new Client(config, true, 4);
+            await user2.Login();
+            user2.IncomingChat += YourObject_IncomingChat;
+            user2.IncomingPartyInvite += YourObject_IncomingPartyInvite;
 
             Thread.Sleep(2000000);
             await Exit();
@@ -160,4 +158,20 @@ namespace HeadlessFFXI
             client.PartyInviteResponce(true);
         }
     }
+    public class TimestampTextWriter : TextWriter
+{
+    private readonly TextWriter _originalOut;
+    public override Encoding Encoding => _originalOut.Encoding;
+
+    public TimestampTextWriter(TextWriter originalOut)
+    {
+        _originalOut = originalOut;
+    }
+
+    public override void WriteLine(string value)
+    {
+        string timestamp = $"[{DateTime.Now:HH:mm:ss.fff}] ";
+        _originalOut.WriteLine(timestamp + value);
+    }
+}
 }
