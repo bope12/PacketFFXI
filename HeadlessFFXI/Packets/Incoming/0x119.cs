@@ -2,7 +2,8 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x0119
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x119_abil_recast.cpp
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P019Handler : IPacketHandler
 {

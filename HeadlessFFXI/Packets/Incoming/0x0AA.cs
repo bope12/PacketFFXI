@@ -2,7 +2,8 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x00AA
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x0aa_magic_data.cpp
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P0AAHandler : IPacketHandler
 {
@@ -13,6 +14,6 @@ public class P0AAHandler : IPacketHandler
         // This packet is sent by the server to populate the clients list of available magic spells.
         var dataReader = new PacketReader(data);
         dataReader.Skip(4);
-        client.Player_Data.SpellList = dataReader.ReadBytes(128).ToArray();
+        client.PlayerData.SpellList = dataReader.ReadBytes(128).ToArray();
     }
 }

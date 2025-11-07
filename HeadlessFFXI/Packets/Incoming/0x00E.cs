@@ -2,10 +2,10 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x000E
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/entity_update.cpp
 using System;
-using System.Linq;
 using System.Text;
-using HeadlessFFXI;
 using static HeadlessFFXI.Client;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P00EHandler : IPacketHandler
 {
@@ -39,44 +39,44 @@ public class P00EHandler : IPacketHandler
         int subKind = raw & 0x7;
         int status = (raw >> 3) & 0x1FFF;
 
-        if(client.Entity_List[entityIndex] == null)
+        if(client.EntityList[entityIndex] == null)
         {
-            client.Entity_List[entityIndex] = new Entity();
+            client.EntityList[entityIndex] = new Entity();
         }
 
         if (updateFlags.HasFlag(SendFlags.Despawn))
         {
-            client.ShowInfo($"Entity Despawn for ID:{entityId} Index:{entityIndex} Name:{client.Entity_List[entityIndex].Name}");
-            client.Entity_List[entityIndex] = new Entity();
+            client.ShowInfo($"Entity Despawn for ID:{entityId} Index:{entityIndex} Name:{client.EntityList[entityIndex].Name}");
+            client.EntityList[entityIndex] = new Entity();
         }
         else
         {
             EntityType entityType = flags1.MonsterFlag ? EntityType.Mob : EntityType.NPC;
-            client.Entity_List[entityIndex].Type = (byte)entityType;
+            client.EntityList[entityIndex].Type = (byte)entityType;
 
             if (updateFlags.HasFlag(SendFlags.Position))
             {
-                client.Entity_List[entityIndex].IsValid = true;
-                client.Entity_List[entityIndex].Pos.Rot = dir;
-                client.Entity_List[entityIndex].Pos.X = x;
-                client.Entity_List[entityIndex].Pos.Y = y;
-                client.Entity_List[entityIndex].Pos.Z = z;
+                client.EntityList[entityIndex].IsValid = true;
+                client.EntityList[entityIndex].Pos.Rotation = (sbyte)dir;
+                client.EntityList[entityIndex].Pos.X = x;
+                client.EntityList[entityIndex].Pos.Y = y;
+                client.EntityList[entityIndex].Pos.Z = z;
                 var targetindex = flags0.FaceTarget;
-                client.Entity_List[entityIndex].TargetIndex = targetindex;
+                client.EntityList[entityIndex].TargetIndex = targetindex;
             }
 
             if (updateFlags.HasFlag(SendFlags.General))
             {
-                client.Entity_List[entityIndex].IsValid = true;
-                client.Entity_List[entityIndex].Hpp = hpp;
-                client.Entity_List[entityIndex].Animation = serverStatus;
+                client.EntityList[entityIndex].IsValid = true;
+                client.EntityList[entityIndex].Hpp = hpp;
+                client.EntityList[entityIndex].Animation = serverStatus;
             }
 
             if (updateFlags.HasFlag(SendFlags.Name))
             {
-                client.Entity_List[entityIndex].IsValid = true;
+                client.EntityList[entityIndex].IsValid = true;
                 var name = Encoding.UTF8.GetString(data.Slice(0x34, 15)).TrimEnd('\0');
-                client.Entity_List[entityIndex].Name = name;
+                client.EntityList[entityIndex].Name = name;
             }
         }
     }

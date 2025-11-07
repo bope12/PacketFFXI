@@ -2,7 +2,8 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x005E
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x05e_conquest.cpp
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P05EHandler : IPacketHandler
 {

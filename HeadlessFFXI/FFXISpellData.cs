@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace FFXISpellData
+namespace HeadlessFFXI
 {
     /// <summary>
     /// Represents a spell's level requirement for a specific job

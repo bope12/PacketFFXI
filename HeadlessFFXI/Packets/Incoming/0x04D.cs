@@ -3,7 +3,8 @@
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x04d_fragments_servmes.cpp
 using System;
 using System.Buffers.Binary;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P04DHandler : IPacketHandler
 {
@@ -12,10 +13,10 @@ public class P04DHandler : IPacketHandler
     public void Handle(Client client, ReadOnlySpan<byte> data)
     {
         // This handles more then just server messages, but for now we only care about those.
-        byte handlerType = data[0x04];
+        var handlerType = data[0x04];
         if (handlerType == 0x01 || handlerType == 0x02) // 0x01 = Server Message
         {
-            uint length = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(0x14, 4));
+            var length = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(0x14, 4));
 
             client.ShowInfo("[SMES]" + System.Text.Encoding.UTF8.GetString(data.Slice(0x18, (int)length)).TrimEnd('\0'));
         }

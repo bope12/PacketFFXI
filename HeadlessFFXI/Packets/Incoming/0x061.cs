@@ -2,7 +2,8 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x0061
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x061_clistatus.cpp
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P061Handler : IPacketHandler
 {
@@ -65,7 +66,7 @@ public class P061Handler : IPacketHandler
         uint mastery_info = dataReader.ReadUInt32();//masteryinfo_t mastery_info;
         uint mastery_exp_now = dataReader.ReadUInt32();
         uint mastery_exp_next = dataReader.ReadUInt32();
-        client.Player_Data.SubJob = sjob;
-        client.Player_Data.SubLevel = sjob_level;
+        client.PlayerData.SubJob = sjob;
+        client.PlayerData.SubLevel = sjob_level;
     }
 }

@@ -1,9 +1,10 @@
 //GP_SERV_COMMAND_LOGOUT
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x000B
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x00b_logout.cpp
+
 using System;
-using System.Net;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P00BHandler : IPacketHandler
 {
@@ -13,17 +14,17 @@ public class P00BHandler : IPacketHandler
     {
         var dataReader = new PacketReader(data);
         dataReader.Skip(4); // Skip header
-        byte LogoutState = dataReader.ReadByte();
+        var logoutState = dataReader.ReadByte();
         dataReader.Skip(3); // Skip padding to align to next uint32
-        uint ipRaw = dataReader.ReadUInt32();
-        uint portRaw = dataReader.ReadUInt32();
-        ushort port = (ushort)(portRaw & 0xFFFF); // Get lower 2 bytes
+        var ipRaw = dataReader.ReadUInt32();
+        var portRaw = dataReader.ReadUInt32();
+        var port = (ushort)(portRaw & 0xFFFF); // Get lower 2 bytes
         //uint8_t  padding00[8];
         //GP_GAME_ECODE        cliErrCode;  // PS2: cliErrCode only ever GP_GAME_ECODE::NOERR; on lsb
 
         client.LogMemoryUsage("Before Zone");
-        if (LogoutState == 2)
-            client.HandleZoneChange(ipRaw, port);
+        if (logoutState == 2)
+            _ = client.HandleZoneChange(ipRaw, port);
 
     }
     // PS2: GP_GAME_LOGOUT_STATE

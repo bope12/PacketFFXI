@@ -2,7 +2,8 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x00DF
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x0df_group_attr.cpp
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P0DFHandler : IPacketHandler
 {
@@ -37,16 +38,16 @@ public class P0DFHandler : IPacketHandler
         {
             byte masterFlag = dataReader.ReadByte();
         }
-        if (entityId == client.Player_Data.ID)
+        if (entityId == client.PlayerData.ID)
         {
-            client.Player_Data.HP = hp;
-            client.Player_Data.MP = mp;
-            client.Player_Data.TP = tp;
-            client.Player_Data.Job = mjob;
-            client.Player_Data.SubJob = sjob;
-            client.Player_Data.Level = mjobLevel;
-            client.Player_Data.SubLevel = sjobLevel;
-            client.Player_Data.Index = targetIndex;
+            client.PlayerData.HP = hp;
+            client.PlayerData.MP = mp;
+            client.PlayerData.TP = tp;
+            client.PlayerData.Job = mjob;
+            client.PlayerData.SubJob = sjob;
+            client.PlayerData.Level = mjobLevel;
+            client.PlayerData.SubLevel = sjobLevel;
+            client.PlayerData.Index = targetIndex;
         }
     }
 }

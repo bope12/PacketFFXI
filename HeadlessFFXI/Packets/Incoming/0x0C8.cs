@@ -3,7 +3,8 @@
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x0c8_group_tbl.cpp
 using System;
 using System.Runtime.InteropServices;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P0C8Handler : IPacketHandler
 {
@@ -13,9 +14,9 @@ public class P0C8Handler : IPacketHandler
     {
         var dataReader = new PacketReader(data);
         dataReader.Skip(0x04); // skip header
-        byte kind = dataReader.ReadByte();
+        var kind = dataReader.ReadByte();
         dataReader.Skip(3);
-        PartyMemberEntry[] partyMembers = new PartyMemberEntry[20];
+        var partyMembers = new PartyMemberEntry[20];
         for (int i = 0; i < 20; i++)
         {
             partyMembers[i] = dataReader.ReadStruct<PartyMemberEntry>();

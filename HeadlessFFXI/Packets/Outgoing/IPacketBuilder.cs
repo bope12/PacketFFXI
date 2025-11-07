@@ -1,4 +1,4 @@
-namespace HeadlessFFXI.Networking.Packets
+namespace HeadlessFFXI.Packets.Outgoing
 {
     public interface IPacketBuilder
     {

@@ -2,7 +2,8 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x001B
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x01b_job_info.cpp
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P01BHandler : IPacketHandler
 {

@@ -2,7 +2,8 @@
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x0058
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x058_assist.cpp
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P058Handler : IPacketHandler
 {
@@ -14,12 +15,12 @@ public class P058Handler : IPacketHandler
         var dataReader = new PacketReader(data);
         dataReader.Skip(4); // Skip header
 
-        uint charId = dataReader.ReadUInt32();
-        uint targetId = dataReader.ReadUInt32();
-        ushort Index = dataReader.ReadUInt16();
-        if(charId == client.Player_Data.ID)
+        var charId = dataReader.ReadUInt32();
+        var targetId = dataReader.ReadUInt32();
+        var Index = dataReader.ReadUInt16();
+        if(charId == client.PlayerData.ID)
         {
-            client.Player_Data.TargetId = targetId;
+            client.PlayerData.TargetId = targetId;
         }
     }
 }

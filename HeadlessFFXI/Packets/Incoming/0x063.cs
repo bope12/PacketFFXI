@@ -2,7 +2,8 @@
 ////https://github.com/atom0s/XiPackets/tree/main/world/server/0x0063
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x063_miscdata.h
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P063Handler : IPacketHandler
 {
@@ -12,7 +13,7 @@ public class P063Handler : IPacketHandler
     {
         var dataReader = new PacketReader(data);
         dataReader.Skip(0x04); // skip header
-        ushort miscType = dataReader.ReadUInt16();
+        var miscType = dataReader.ReadUInt16();
         // Merits       = 0x02, // Merit menu info not merits themselves
         // Monstrosity1 = 0x03, // Monstrosity Garbage
         // Monstrosity2 = 0x04, // Monstrosity Garbage

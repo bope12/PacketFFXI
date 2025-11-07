@@ -6,14 +6,15 @@ using System.IO;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets;
 
 public class PacketSender : IDisposable
 {
     private readonly OutgoingQueue _queue;
     private readonly UdpClient _server; // whatever wrapper you use for socket/Send()
     private readonly Timer _timer;
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
 
     private ushort _clientPacketId = 1;
     private ushort _serverPacketId = 1; // last received from server
@@ -22,7 +23,7 @@ public class PacketSender : IDisposable
     private readonly MD5 _hasher = MD5.Create();
     private readonly Zlib _zlib;
     private Blowfish _blowfish;
-    private bool _disposed = false;
+    private bool _disposed;
 
     public PacketSender(OutgoingQueue queue, UdpClient server, Blowfish blowfish, Zlib myzlib)
     {
@@ -52,7 +53,7 @@ public class PacketSender : IDisposable
     {
         if (_disposed) return;
 
-        List<OutgoingPacket> toSend = _queue.DrainAll();
+        var toSend = _queue.DrainAll();
         if (toSend.Count == 0)
             return;
 
@@ -64,7 +65,7 @@ public class PacketSender : IDisposable
             // Header: client & server packet IDs
             ms.Write(BitConverter.GetBytes(_clientPacketId), 0, 2);
             ms.Write(BitConverter.GetBytes(_serverPacketId), 0, 2);
-            byte[] padding = new byte[24];
+            var padding = new byte[24];
             ms.Write(padding, 0, padding.Length);
 
             // Append all queued small packets
@@ -78,12 +79,12 @@ public class PacketSender : IDisposable
             padding = new byte[16];
             ms.Write(padding, 0, padding.Length);
 
-            byte[] data = ms.ToArray();
+            var data = ms.ToArray();
 
             // Apply your existing transforms
-            packet_Compress(ref data);
-            packet_addmd5(ref data);
-            packet_Encode(ref data);
+            Packet_Compress(ref data);
+            Packet_AddMd5(ref data);
+            Packet_Encode(ref data);
 
             //Console.WriteLine("Sending packet with ClientPacketId: {0}, ServerPacketId: {1}, Size: {2}", _clientPacketId, _serverPacketId, data.Length);
 
@@ -116,12 +117,12 @@ public class PacketSender : IDisposable
     }
 
     #region Packet Helpers
-    public void packet_Compress(ref byte[] data)
+    public void Packet_Compress(ref byte[] data)
     {
-        byte[] buffer = new byte[1800];
-        byte[] input = new byte[data.Length - PacketHead];
-        System.Buffer.BlockCopy(data, PacketHead, input, 0, data.Length - PacketHead);
-        //Lets Compress this packet
+        var buffer = new byte[1800];
+        var input = new byte[data.Length - PacketHead];
+        Buffer.BlockCopy(data, PacketHead, input, 0, data.Length - PacketHead);
+
         var finalsize = _zlib.ZlibCompress(input, ref buffer);
         Array.Resize(ref buffer, finalsize);
         input = new byte[PacketHead + finalsize + 16];
@@ -130,28 +131,28 @@ public class PacketSender : IDisposable
         data = input;
 
         input = BitConverter.GetBytes(finalsize);
-        System.Buffer.BlockCopy(input, 0, data, data.Length - 20, input.Length);
+        Buffer.BlockCopy(input, 0, data, data.Length - 20, input.Length);
     }
 
-    public void packet_Encode(ref byte[] data)
+    public void Packet_Encode(ref byte[] data)
     {
         //Lets encipher this packet
-        int CypherSize = (int)((data.Length / 4) & ~1); // same as & -2
+        var cypherSize = (data.Length / 4) & ~1; // same as & -2
 
         Span<byte> dataSpan = data;
 
-        for (int j = 0; j < CypherSize; j += 2)
+        for (var j = 0; j < cypherSize; j += 2)
         {
-            int offset1 = (int)(4 * (j + 7));
-            int offset2 = (int)(4 * (j + 8));
+            var offset1 = 4 * (j + 7);
+            var offset2 = 4 * (j + 8);
 
             // If not enough bytes remain for a full 64-bit block, skip
             if (offset2 + 4 > data.Length)
                 break;
 
             // Read two 32-bit words from buff
-            uint xl = BinaryPrimitives.ReadUInt32LittleEndian(dataSpan.Slice(offset1, 4));
-            uint xr = BinaryPrimitives.ReadUInt32LittleEndian(dataSpan.Slice(offset2, 4));
+            var xl = BinaryPrimitives.ReadUInt32LittleEndian(dataSpan.Slice(offset1, 4));
+            var xr = BinaryPrimitives.ReadUInt32LittleEndian(dataSpan.Slice(offset2, 4));
 
             // Encrypt the pair
             _blowfish.Blowfish_encipher(ref xl, ref xr);
@@ -161,12 +162,12 @@ public class PacketSender : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(dataSpan.Slice(offset2, 4), xr);
         }
     }
-    public void packet_addmd5(ref byte[] data)
+    public void Packet_AddMd5(ref byte[] data)
     {
-        byte[] tomd5 = new byte[data.Length - (PacketHead + 16)];
-        System.Buffer.BlockCopy(data, PacketHead, tomd5, 0, tomd5.Length);
+        var tomd5 = new byte[data.Length - (PacketHead + 16)];
+        Buffer.BlockCopy(data, PacketHead, tomd5, 0, tomd5.Length);
         tomd5 = _hasher.ComputeHash(tomd5);
-        System.Buffer.BlockCopy(tomd5, 0, data, data.Length - 16, 16);
+        Buffer.BlockCopy(tomd5, 0, data, data.Length - 16, 16);
     }
     #endregion
 }
@@ -185,22 +186,18 @@ public class OutgoingQueue
         return list;
     }
 }
-public class OutgoingPacket
+public class OutgoingPacket(byte[] payload)
 {
-    public byte[] Data { get; }
+    public byte[] Data { get; } = payload ?? throw new ArgumentNullException(nameof(payload));
 
-    public OutgoingPacket(byte[] payload)
-    {
-        Data = payload ?? throw new ArgumentNullException(nameof(payload));
-    }
     public void SetType(ushort typeIn)
     {
-        ushort type = (ushort)(typeIn & 0x1FF);
+        var type = (ushort)(typeIn & 0x1FF);
         Data[0] = (byte)(type & 0xFF);   // lower 8 bits of type
     }
     public void SetSize(ushort sizeIn)
     {
-        byte size = (byte)(sizeIn & 0xFE);
+        var size = (byte)(sizeIn & 0xFE);
         Data[1] = (byte)(size & 0xFE); // second byte replaced with size
     }
     public void SetPacketId(ushort idIn)

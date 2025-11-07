@@ -3,7 +3,8 @@
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x0dd_group_list.cpp
 using System;
 using System.Runtime.InteropServices;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P0DDHandler : IPacketHandler
 {

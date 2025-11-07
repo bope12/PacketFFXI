@@ -1,21 +1,16 @@
 using System;
 
-namespace HeadlessFFXI.Networking.Packets
+namespace HeadlessFFXI.Packets.Outgoing
 {
-    public class P0EABuilder : IPacketBuilder
+    public class P0EABuilder(uint mode) : IPacketBuilder
     {
         public ushort Type => 0xEA;
         public ushort Size => 0x04;
-        public uint Mode;
-
-        public P0EABuilder(uint mode)
-        {
-            Mode = mode;
-        }
+        public uint Mode = mode;
 
         public OutgoingPacket Build()
         {
-            byte[] data = new byte[8];
+            var data = new byte[8];
             BitConverter.GetBytes(Mode).CopyTo(data, 0x04);
             // Wrap it in your packet object
             var packet = new OutgoingPacket(data);

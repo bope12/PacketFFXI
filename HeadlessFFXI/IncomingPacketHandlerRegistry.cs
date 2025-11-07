@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI;
 
 public class PacketHandlerRegistry
 {
@@ -44,7 +45,7 @@ public class PacketHandlerRegistry
         GenerateHandlerStub(packetId);
         return false;
     }
-        private void GenerateHandlerStub(ushort packetId)
+    private void GenerateHandlerStub(ushort packetId)
     {
         try
         {
@@ -60,7 +61,8 @@ public class PacketHandlerRegistry
 //https://github.com/atom0s/XiPackets/tree/main/world/server/0x{packetId:X4}
 //
 using System;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class {className} : IPacketHandler
 {{

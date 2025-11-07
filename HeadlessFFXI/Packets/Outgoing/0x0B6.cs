@@ -1,21 +1,14 @@
 using System;
 using System.Text;
 
-
-namespace HeadlessFFXI.Networking.Packets
+namespace HeadlessFFXI.Packets.Outgoing
 {
-    public class P0B6Builder : IPacketBuilder
+    public class P0B6Builder(string user, string message) : IPacketBuilder
     {
         public ushort Type => 0xB6;
         public ushort Size;
-        private readonly string _user;
-        private readonly string _message;
-
-        public P0B6Builder(string user, string message)
-        {
-            _user = user ?? throw new ArgumentNullException(nameof(user));
-            _message = message ?? throw new ArgumentNullException(nameof(message));
-        }
+        private readonly string _user = user ?? throw new ArgumentNullException(nameof(user));
+        private readonly string _message = message ?? throw new ArgumentNullException(nameof(message));
 
         public OutgoingPacket Build()
         {

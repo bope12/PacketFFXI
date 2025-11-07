@@ -3,7 +3,8 @@
 //https://github.com/LandSandBoat/server/blob/base/src/map/packets/s2c/0x01c_item_max.cpp
 using System;
 using System.Buffers.Binary;
-using HeadlessFFXI;
+
+namespace HeadlessFFXI.Packets.Incoming;
 
 public class P01CHandler : IPacketHandler
 {
@@ -11,13 +12,15 @@ public class P01CHandler : IPacketHandler
 
     public void Handle(Client client, ReadOnlySpan<byte> data)
     {
-        client.Player_Data.Inv = new Inventory();
-        client.Player_Data.Inv.Container = new Storage[18];
-        for (int i = 0; i < 18; i++)
+        client.PlayerData.Inv = new Inventory
         {
-            client.Player_Data.Inv.Container[i].size = data[0x04 + i];
-            client.Player_Data.Inv.Container[i].available = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(0x24 + ( i * 2), 2));
-            client.Player_Data.Inv.Container[i].slots = new InventorySlot[client.Player_Data.Inv.Container[i].size];
+            Container = new Storage[18]
+        };
+        for (var i = 0; i < 18; i++)
+        {
+            client.PlayerData.Inv.Container[i].size = data[0x04 + i];
+            client.PlayerData.Inv.Container[i].available = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(0x24 + ( i * 2), 2));
+            client.PlayerData.Inv.Container[i].slots = new InventorySlot[client.PlayerData.Inv.Container[i].size];
         }
     }
 }

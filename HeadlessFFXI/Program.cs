@@ -3,8 +3,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using HeadlessFFXI.Networking.Packets;
-using PathFinder.Common;
+using HeadlessFFXI.Packets.Outgoing;
 using static HeadlessFFXI.Client;
 
 namespace HeadlessFFXI
@@ -12,17 +11,20 @@ namespace HeadlessFFXI
     class Program
     {
         public static Client User;
-        static async Task Main(string[] args)
+
+        private static async Task Main(string[] args)
         {
             #region Settings
             Console.SetOut(new TimestampTextWriter(Console.Out));
-            Config settings = new Config();
-            settings.server = "127.0.0.1";
+            var settings = new Config
+            {
+                server = "127.0.0.1"
+            };
             if (args.Length == 6 || args.Length == 8)
             {
-                for (int i = 0; i <= args.Length / 2; i += 2)
+                for (var i = 0; i <= args.Length / 2; i += 2)
                 {
-                    string s = args[i];
+                    var s = args[i];
                     switch (s)
                     {
                         case "-user":
@@ -32,7 +34,7 @@ namespace HeadlessFFXI
                             settings.password = args[i + 1];
                             break;
                         case "-slot":
-                            settings.char_slot = Int16.Parse(args[i + 1]) - 1;
+                            settings.char_slot = short.Parse(args[i + 1]) - 1;
                             break;
                         case "-server":
                             settings.server = args[i + 1];
@@ -43,11 +45,10 @@ namespace HeadlessFFXI
             }
             else if (File.Exists("config.cfg"))
             {
-                string line;
-                System.IO.StreamReader cfg = new System.IO.StreamReader("config.cfg");
-                while ((line = cfg.ReadLine()) != null)
+                var cfg = new StreamReader("config.cfg");
+                while (await cfg.ReadLineAsync() is { } line)
                 {
-                    string[] setting = line.Split(":");
+                    var setting = line.Split(":");
                     switch (setting[0])
                     {
                         case "username":
@@ -85,29 +86,79 @@ namespace HeadlessFFXI
                 settings.password = Console.ReadLine();
             }
             #endregion
-            User = new Client(settings, true, 4);
-            await User.Login();
-            User.IncomingChat += YourObject_IncomingChat;
-            User.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+            //User = new Client(settings, true, 4);
+            //await User.Login();
+            //User.IncomingChat += YourObject_IncomingChat;
+            //User.IncomingPartyInvite += YourObject_IncomingPartyInvite;
 
+            //Thread.Sleep(4000);
+            //var config = new Config();
+            //config.user = "hjhjhjhjhj";
+            //config.password = "jhjhjhjh";
+            //config.server = "127.0.0.1";
+            //config.char_slot = 0;
+            //var user2 = new Client(config, true, 4);
+            //await user2.Login();
+            //user2.IncomingChat += YourObject_IncomingChat;
+            //user2.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+            var config1 = new Config
+            {
+                user = "party1",
+                password = "pass",
+                server = "127.0.0.1",
+                char_slot = 0
+            };
+
+            var user1 = new Client(config1);
+            config1.user = "party2";
+            var user2 = new Client(config1);
+            config1.user = "party3";
+            var user3 = new Client(config1);
+            config1.user = "party4";
+            var user4 = new Client(config1);
+            config1.user = "party5";
+            var user5 = new Client(config1);
+            config1.user = "party6";
+            var user6 = new Client(config1);
+
+            _ = user1.Login();
             Thread.Sleep(4000);
-            var config = new Config();
-            config.user = "hjhjhjhjhj";
-            config.password = "jhjhjhjh";
-            config.server = "127.0.0.1";
-            config.char_slot = 0;
-            var user2 = new Client(config, true, 4);
-            await user2.Login();
+            _ = user2.Login();
+            Thread.Sleep(4000);
+            _ = user3.Login();
+            Thread.Sleep(4000);
+            _ = user4.Login();
+            Thread.Sleep(4000);
+            _ = user5.Login();
+            Thread.Sleep(4000);
+            await user6.Login();
+            Thread.Sleep(4000);
+            user1.IncomingChat += YourObject_IncomingChat;
+            user1.IncomingPartyInvite += YourObject_IncomingPartyInvite;
             user2.IncomingChat += YourObject_IncomingChat;
             user2.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+            user3.IncomingChat += YourObject_IncomingChat;
+            user3.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+            user4.IncomingChat += YourObject_IncomingChat;
+            user4.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+            user5.IncomingChat += YourObject_IncomingChat;
+            user5.IncomingPartyInvite += YourObject_IncomingPartyInvite;
+            user6.IncomingChat += YourObject_IncomingChat;
+            user6.IncomingPartyInvite += YourObject_IncomingPartyInvite;
 
+            Thread.Sleep(4000);
+            user1.SendPartyInvite(user2.PlayerData.ID);
+            user1.SendPartyInvite(user3.PlayerData.ID);
+            user1.SendPartyInvite(user4.PlayerData.ID);
+            user1.SendPartyInvite(user5.PlayerData.ID);
+            user1.SendPartyInvite(user6.PlayerData.ID);
             Thread.Sleep(2000000);
-            await Exit();
-            return;
+            Exit();
         }
-        static async Task Exit()
+
+        private static void Exit()
         {
-            System.Environment.Exit(1);
+            Environment.Exit(1);
         }
 
         // Event handler method
@@ -116,62 +167,50 @@ namespace HeadlessFFXI
             var client = (Client)sender;
             //Console.WriteLine($"Chat from {e.Name}: {e.Message}");
             //Console.WriteLine($"Type: {e.MessageType}, IsGM: {e.IsGM}, Zone: {e.ZoneID}");
-            if (e.Message.ToLower().Contains("logout"))
+            if (e.Message.Contains("logout", StringComparison.CurrentCultureIgnoreCase))
             {
-                client.Logout();
+                _ = client.Logout();
             }
-            else if (e.Message.ToLower().Contains("invite"))
-                client.SendPartyInvite(e.Name);
-            else if (e.Message.ToLower().Contains("attack"))
+            else if (e.Message.Contains("attack", StringComparison.CurrentCultureIgnoreCase))
             {
                 var targetIndexarg = e.Message[7..];
-                var targetindex = UInt16.Parse(targetIndexarg);
+                var targetindex = ushort.Parse(targetIndexarg);
                 client.Attack(targetindex);
             }
-            else if (e.Message.ToLower().Contains("cast"))
+            else if (e.Message.Contains("cast", StringComparison.CurrentCultureIgnoreCase))
             {
                 var cure = client.Spellrepo.GetByName("cure");
-                client.CastMagic(1024, cure.Id);
-                Console.WriteLine(client.CanUseSpell(1).ToString() + " " + client.CanUseSpell(128).ToString());
+                if (cure != null) client.CastMagic(1024, cure.Id);
+                Console.WriteLine(client.CanUseSpell(1) + " " + client.CanUseSpell(128));
             }
-            else if (e.Message.ToLower().Contains("heal"))
+            else if (e.Message.Contains("heal", StringComparison.CurrentCultureIgnoreCase))
                 client.Heal(HealMode.Toggle);
-            else if (e.Message.ToLower().Contains("move"))
+            else if (e.Message.Contains("move", StringComparison.CurrentCultureIgnoreCase))
             {
-                var pos1 = new position_t();
-                pos1.X = 61.3066F;
-                pos1.Y = 0.7218f;
-                pos1.Z = -50.5319f;
-                client.MoveTo(pos1);
+                var ent = client.GetEntityByName("Test");
+                if(ent != null)
+                    client.MoveTo(ent.Pos);
             }
             else
                 client.SendTell(e.Name, e.Message);
             // Do whatever you need with the data
         }
-        private static double GetDistance(float x1, float y1, float x2, float y2)
-        {
-            return Math.Sqrt(Math.Pow((x2 - x1), 2) + Math.Pow((y2 - y1), 2));
-        }
+
         private static void YourObject_IncomingPartyInvite(object sender, IncomingPartyInviteEventArgs e)
         {
             var client = (Client)sender;
             client.PartyInviteResponce(true);
         }
     }
-    public class TimestampTextWriter : TextWriter
-{
-    private readonly TextWriter _originalOut;
-    public override Encoding Encoding => _originalOut.Encoding;
 
-    public TimestampTextWriter(TextWriter originalOut)
+    public class TimestampTextWriter(TextWriter originalOut) : TextWriter
     {
-        _originalOut = originalOut;
-    }
+        public override Encoding Encoding => originalOut.Encoding;
 
-    public override void WriteLine(string value)
-    {
-        string timestamp = $"[{DateTime.Now:HH:mm:ss.fff}] ";
-        _originalOut.WriteLine(timestamp + value);
+        public override void WriteLine(string value)
+        {
+            var timestamp = $"[{DateTime.Now:HH:mm:ss.fff}] ";
+            originalOut.WriteLine(timestamp + value);
+        }
     }
-}
 }
