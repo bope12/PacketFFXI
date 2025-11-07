@@ -21,6 +21,7 @@ public class P00BHandler : IPacketHandler
         //uint8_t  padding00[8];
         //GP_GAME_ECODE        cliErrCode;  // PS2: cliErrCode only ever GP_GAME_ECODE::NOERR; on lsb
 
+        client.LogMemoryUsage("Before Zone");
         if (LogoutState == 2)
             client.HandleZoneChange(ipRaw, port);
 

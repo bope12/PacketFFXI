@@ -40,8 +40,10 @@ public class P00DHandler : IPacketHandler
         uint customProperty2 = dataReader.ReadUInt32();
         ushort petActIndex = dataReader.ReadUInt16();
 
-        if(client.Entity_List[charIndex] == null)
+        if (client.Entity_List[charIndex] == null)
+        {
             client.Entity_List[charIndex] = new Entity();
+        }
 
         //Console.WriteLine("Char Update for ID:{0:G} Index:{1:G}", charID, updateIndex);
         //Console.WriteLine(updateFlags);

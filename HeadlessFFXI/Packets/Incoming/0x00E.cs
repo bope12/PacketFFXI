@@ -40,7 +40,9 @@ public class P00EHandler : IPacketHandler
         int status = (raw >> 3) & 0x1FFF;
 
         if(client.Entity_List[entityIndex] == null)
+        {
             client.Entity_List[entityIndex] = new Entity();
+        }
 
         if (updateFlags.HasFlag(SendFlags.Despawn))
         {

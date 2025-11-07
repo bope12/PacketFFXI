@@ -18,6 +18,7 @@ using System.Diagnostics;
 using FFXISpellData;
 using System.Text.Json;
 using PathFinder.Common;
+using System.Buffers;
 
 namespace HeadlessFFXI
 {
@@ -603,8 +604,7 @@ namespace HeadlessFFXI
                 {
                     //Console.WriteLine($"[ParseIncoming] Waiting for packet...");
                     byte[] receiveBytes = Gameserver.Receive(ref RemoteIpEndPoint);
-                    byte[] backUpBytes = new byte[receiveBytes.Length];
-                    receiveBytes.CopyTo(backUpBytes, 0);
+
                     //Console.WriteLine($"[ParseIncoming] Received {receiveBytes.Length} bytes");
                     ushort server_packet_id = BitConverter.ToUInt16(receiveBytes, 0);
                     ushort client_packet_id = BitConverter.ToUInt16(receiveBytes, 2);
@@ -652,67 +652,73 @@ namespace HeadlessFFXI
                     if (!tail.SequenceEqual(tomd5))
                     {
                         ShowError($"[ParseIncoming]No md5 match keyhash:{currentBlowfish.Key}");
+                        continue;
                     }
 
 
                     //Zlib compress's all but header
-                    uint packetsize = BitConverter.ToUInt32(receiveBytes, receiveBytes.Length - 20);// - 20; //Location of packetsize set by encoding by server
-                    //byte[] buffer = new byte[receiveBytes.Length - 21 - Packet_Head];
+                    uint packetsize = BitConverter.ToUInt32(receiveBytes, receiveBytes.Length - 20);
                     byte[] buffer = new byte[(int)Math.Ceiling(packetsize / 8m)];
                     System.Buffer.BlockCopy(receiveBytes, Packet_Head + 1, buffer, 0, buffer.Length);
                     //Console.WriteLine("ToDelib:   " + BitConverter.ToString(buffer).Replace("-", " "));
                     int w = 0;
                     uint pos = myzlib.jump[0];
-                    byte[] outbuf = new byte[4000];
-                    //Console.WriteLine(buffer.Length + ":" + packetsize);
-                    for (int i = 0; i < packetsize && w < 4000; i++)
+                    var outbuf = ArrayPool<byte>.Shared.Rent(4000);
+                    try
                     {
-                        int s = ((buffer[i / 8] >> (i & 7)) & 1);
-                        pos = myzlib.jump[pos + s];
-                        //Console.WriteLine("{0:G} : {1:G}  0,1 {2:G},{3:G}", s, pos, myzlib.jump[pos], myzlib.jump[pos+1]);
-                        if (myzlib.jump[pos] != 0 || myzlib.jump[pos + 1] != 0)
+                        //Console.WriteLine(buffer.Length + ":" + packetsize);
+                        for (int i = 0; i < packetsize && w < 4000; i++)
                         {
-                            //Console.WriteLine("Pos:{0:G} not both zero", pos);
-                            continue;
+                            int s = (buffer[i / 8] >> (i & 7)) & 1;
+                            pos = myzlib.jump[pos + s];
+                            //Console.WriteLine("{0:G} : {1:G}  0,1 {2:G},{3:G}", s, pos, myzlib.jump[pos], myzlib.jump[pos+1]);
+                            if (myzlib.jump[pos] != 0 || myzlib.jump[pos + 1] != 0)
+                            {
+                                //Console.WriteLine("Pos:{0:G} not both zero", pos);
+                                continue;
+                            }
+                            //Console.WriteLine("DATA:{0:G}", myzlib.jump[pos + 3]);
+                            outbuf[w++] = BitConverter.GetBytes(myzlib.jump[pos + 3])[0];
+                            //Console.WriteLine(BitConverter.GetBytes(myzlib.jump[pos + 3])[0]);
+                            pos = myzlib.jump[0];
                         }
-                        //Console.WriteLine("DATA:{0:G}", myzlib.jump[pos + 3]);
-                        outbuf[w++] = BitConverter.GetBytes(myzlib.jump[pos + 3])[0];
-                        //Console.WriteLine(BitConverter.GetBytes(myzlib.jump[pos + 3])[0]);
-                        pos = myzlib.jump[0];
+                        byte[] final = new byte[w];
+                        System.Buffer.BlockCopy(outbuf, 0, final, 0, w);
+                        //Console.WriteLine("Dezlib size:" + final.Length);
+                        //bytes = BitConverter.ToString(final).Split('-');
+                        //for (int i = 0; i < bytes.Length; i += 16)
+                        //{
+                        //    Console.WriteLine("Dezlib:   " + string.Join(" ", bytes.Skip(i).Take(16)));
+                        //}
+
+                        int index = 0;
+                        int size = final.Length > 2 ? final[index + 1] & 0x0FE : 0;
+
+                        while (index + 2 <= final.Length)
+                        {
+                            // Make sure we can at least read the type and size
+                            ushort type = (ushort)(BitConverter.ToUInt16(final, index) & 0x1FF);
+                            //Console.WriteLine("[ParseIncoming]Type:{0:G}", type);
+                            size = final[index + 1] & 0x0FE;
+
+                            int packetLength = size * 2;
+
+                            // Safety check
+                            if (packetLength <= 0 || index + packetLength > final.Length)
+                            {
+                                //Console.WriteLine($"[WARN] Invalid packet {type} length at index {index}. Size={packetLength}, Remaining={final.Length - index}");
+                                break; // prevent crash
+                            }
+
+                            ReadOnlySpan<byte> packetData = new ReadOnlySpan<byte>(final, index, packetLength);
+                            _registry.TryHandle(this, type, packetData);
+
+                            index += packetLength;
+                        }
                     }
-                    byte[] final = new byte[w];
-                    System.Buffer.BlockCopy(outbuf, 0, final, 0, w);
-
-                    //Console.WriteLine("Dezlib size:" + final.Length);
-                    //bytes = BitConverter.ToString(final).Split('-');
-                    //for (int i = 0; i < bytes.Length; i += 16)
-                    //{
-                    //    Console.WriteLine("Dezlib:   " + string.Join(" ", bytes.Skip(i).Take(16)));
-                    //}
-
-                    int index = 0;
-                    int size = final.Length > 2 ? final[index + 1] & 0x0FE : 0;
-
-                    while (index + 2 <= final.Length)
+                    finally
                     {
-                        // Make sure we can at least read the type and size
-                        ushort type = (ushort)(BitConverter.ToUInt16(final, index) & 0x1FF);
-                        //Console.WriteLine("[ParseIncoming]Type:{0:G}", type);
-                        size = final[index + 1] & 0x0FE;
-
-                        int packetLength = size * 2;
-
-                        // Safety check
-                        if (packetLength <= 0 || index + packetLength > final.Length)
-                        {
-                            //Console.WriteLine($"[WARN] Invalid packet {type} length at index {index}. Size={packetLength}, Remaining={final.Length - index}");
-                            break; // prevent crash
-                        }
-
-                        ReadOnlySpan<byte> packetData = new ReadOnlySpan<byte>(final, index, packetLength);
-                        _registry.TryHandle(this, type, packetData);
-
-                        index += packetLength;
+                        ArrayPool<byte>.Shared.Return(outbuf);
                     }
                 }
                 catch (SocketException)
@@ -758,6 +764,9 @@ namespace HeadlessFFXI
             // Set zoning flag to prevent position updates from sending during transition
             Player_Data.zoning = true;
 
+            //Clear Entity List
+            Array.Clear(Entity_List, 0, Entity_List.Length);
+
             // Always stop position updates during zone change
             _posCts?.Cancel();
 
@@ -776,10 +785,12 @@ namespace HeadlessFFXI
 
             // Dispose packet sender
             Packetsender?.Dispose();
+            await Task.Delay(100);
             Packetsender = null;
 
             // Dispose cancellation token
             _posCts?.Dispose();
+            await Task.Delay(100);
             _posCts = null;
 
             _posCts = new CancellationTokenSource();
@@ -789,7 +800,7 @@ namespace HeadlessFFXI
                 ShowInfo($"[HandleZoneChange]Changing zone server to {newEndpoint.Address}:{port}");
 
                 // Close old connection
-                Gameserver?.Close();
+                Gameserver?.Dispose();
 
                 _incCts?.Cancel();
 
@@ -826,6 +837,8 @@ namespace HeadlessFFXI
 
             // Always do zone login (this will restart position updates via OutGoing_O11)
             await Task.Run(() => Logintozone(false), _posCts.Token);
+
+            LogMemoryUsage("After Zone");
         }
 
         private async Task CleanupGameSession()
@@ -885,8 +898,11 @@ namespace HeadlessFFXI
 
             var shashkey = new sbyte[16];
             Buffer.BlockCopy(hashkey, 0, shashkey, 0, 16);
+
+            var oldBlowfish = CurrentBlowfish;
             CurrentBlowfish = new Blowfish();
             CurrentBlowfish.Init(shashkey, 16);
+            oldBlowfish = null;
 
             // Keep PacketSender encryption in sync
             if (Packetsender != null)
@@ -1475,6 +1491,11 @@ namespace HeadlessFFXI
         {
             if (LogLevel > 1)
                 Console.WriteLine($"[{Account_Data.Username}]{outstring}");
+        }
+        public void LogMemoryUsage(string context)
+        {
+            long memoryUsed = GC.GetTotalMemory(false) / 1024 / 1024;
+            ShowInfo($"[Memory][{context}] Current: {memoryUsed}MB, Gen0: {GC.CollectionCount(0)}, Gen1: {GC.CollectionCount(1)}, Gen2: {GC.CollectionCount(2)}");
         }
     }
 
